@@ -10,6 +10,7 @@ npm ci
 npm run dev
 ```
 
-The Knight comparison preview is available at `/knight-preview.html`. Build and
+The [Knight comparison preview](https://emerald-ops.github.io/RED/knight-preview.html)
+loads the supplied Patch Knight alongside the original and V2 models. Build and
 type-check the app with `npm run build`. Changes pushed to `main` are published
 to GitHub Pages by the workflow in [`.github/workflows/deploy-pages.yml`](./.github/workflows/deploy-pages.yml).
