@@ -12,6 +12,8 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 body { background: #101619; }
 .studio, #knight-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 #knight-canvas { display: block; touch-action: none; }
+#knight-canvas { cursor: grab; }
+#knight-canvas:active { cursor: grabbing; }
 .studio-panel {
   position: absolute;
   inset: 18px auto 18px 18px;
@@ -55,6 +57,7 @@ h1 { margin: 0; color: #e8e2d5; font-size: 37px; font-weight: 400; line-height: 
 .back-link { display: inline-block; margin-top: 25px; color: #d3bb81; font: 11px Arial, sans-serif; text-decoration: none; }
 .back-link:hover { color: #f3e4bd; }
 .view-caption { position: absolute; right: 22px; bottom: 20px; color: #c9c1ae; font: 700 9px Arial, sans-serif; letter-spacing: .14em; text-shadow: 0 2px 8px #000; }
+.orbit-hint { position: absolute; top: 20px; right: 22px; margin: 0; padding: 9px 12px; border: 1px solid #c8b27755; background: #101619c9; color: #d3bb81; font: 700 9px Arial, sans-serif; letter-spacing: .12em; pointer-events: none; }
 @media (max-width: 700px) {
   .studio-panel { inset: auto 8px 8px; width: auto; max-height: 49vh; padding: 13px 15px; }
   .eyebrow { margin-top: 12px; }
@@ -66,4 +69,5 @@ h1 { margin: 0; color: #e8e2d5; font-size: 37px; font-weight: 400; line-height: 
   .view-picker { margin-top: 10px; }
   .back-link { margin-top: 12px; }
   .view-caption { top: 16px; right: 12px; bottom: auto; }
+  .orbit-hint { top: 43vh; right: 12px; padding: 7px 9px; font-size: 8px; }
 }

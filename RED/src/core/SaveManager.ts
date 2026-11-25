@@ -4,7 +4,7 @@ import { createCharacter, normalizeTowerProgression } from './types';
 const DATABASE = 'red-forgotten-valley';
 const STORE = 'saves';
 const SAVE_KEY = 'main';
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
 
 interface SaveRecord {
   version: number;
@@ -66,6 +66,23 @@ export class SaveManager {
             ...record.character,
             tower: normalizeTowerProgression(record.character.tower, 'hub'),
           },
+        };
+        continue;
+      }
+      if (record.version === 2) {
+        const character = record.character;
+        const equipment = [...character.equipment];
+        const wornSwordIndex = equipment.indexOf('Worn sword');
+        if (character.race === 'Human'
+          && character.inventory.includes('Broadsword')
+          && (wornSwordIndex !== -1 || equipment.length === 0)) {
+          if (wornSwordIndex !== -1) equipment[wornSwordIndex] = 'Broadsword';
+          else equipment.push('Broadsword');
+        }
+        record = {
+          ...record,
+          version: 3,
+          character: { ...character, equipment },
         };
         continue;
       }

@@ -106,9 +106,6 @@ let patchMixer: THREE.AnimationMixer | null = null;
 let patchActiveAction: THREE.AnimationAction | null = null;
 let patchClips: THREE.AnimationClip[] = [];
 let displayMode: DisplayMode = 'compare';
-let activeView: ViewName = 'front';
-let cameraDestination = new THREE.Vector3(0, 1.12, 7.6);
-let targetDestination = new THREE.Vector3(0, 0.96, 0);
 
 const views: Record<ViewName, { label: string; position: THREE.Vector3; target: THREE.Vector3 }> = {
   front: { label: 'FRONT · PATCH, ORIGINAL, AND V2', position: new THREE.Vector3(0, 1.1, 9.2), target: new THREE.Vector3(0, 0.96, 0) },
@@ -118,8 +115,7 @@ const views: Record<ViewName, { label: string; position: THREE.Vector3; target: 
 };
 
 function arrangeModels(): void {
-  const view = views[activeView];
-  const direction = view.target.clone().sub(view.position).setY(0).normalize();
+  const direction = controls.target.clone().sub(camera.position).setY(0).normalize();
   const screenRight = new THREE.Vector3().crossVectors(direction, new THREE.Vector3(0, 1, 0)).normalize();
   const canvasBounds = canvas!.getBoundingClientRect();
   const panelBounds = studioPanel?.getBoundingClientRect();
@@ -147,12 +143,9 @@ function arrangeModels(): void {
 }
 
 function showView(name: ViewName): void {
-  activeView = name;
   const view = views[name];
-  cameraDestination = view.position.clone();
-  targetDestination = view.target.clone();
-  camera.position.copy(cameraDestination);
-  controls.target.copy(targetDestination);
+  camera.position.copy(view.position);
+  controls.target.copy(view.target);
   controls.update();
   viewCaption.textContent = view.label;
   arrangeModels();
@@ -160,6 +153,14 @@ function showView(name: ViewName): void {
     button.setAttribute('aria-pressed', String(button.dataset.view === name));
   });
 }
+
+controls.addEventListener('change', arrangeModels);
+controls.addEventListener('start', () => {
+  viewCaption.textContent = 'FREE ORBIT · DRAG TO INSPECT';
+  document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((button) => {
+    button.setAttribute('aria-pressed', 'false');
+  });
+});
 
 function selectModels(mode: DisplayMode): void {
   displayMode = mode;
@@ -421,8 +422,6 @@ function resize(): void {
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const delta = Math.min(clock.getDelta(), 0.05);
-  camera.position.lerp(cameraDestination, 1 - Math.exp(-5 * delta));
-  controls.target.lerp(targetDestination, 1 - Math.exp(-5 * delta));
   controls.update();
   patchMixer?.update(delta);
   renderer.render(scene, camera);

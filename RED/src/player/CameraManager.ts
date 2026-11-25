@@ -27,7 +27,7 @@ export class CameraManager {
   ): void {
     this.yaw -= lookX * sensitivity;
     this.pitch = THREE.MathUtils.clamp(this.pitch - lookY * sensitivity, -1.15, 0.65);
-    player.rotation.y = this.yaw;
+    player.rotation.y = this.yaw + Math.PI;
     player.visible = this.mode !== 'first-person';
     const height = this.mode === 'first-person' ? eyeHeight : targetHeight;
     this.lookTarget.set(player.position.x, player.position.y + height, player.position.z);
@@ -37,7 +37,7 @@ export class CameraManager {
       this.cameraInitialized = false;
       return;
     }
-    const distance = 6.8;
+    const distance = 4.8;
     this.offset.set(
       Math.sin(this.yaw) * Math.cos(this.pitch) * distance,
       2.45 - Math.sin(this.pitch) * distance,
