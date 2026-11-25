@@ -379,7 +379,10 @@ export class Player {
 
     const wantsSprint = sprinting && (move.y !== 0 || move.x !== 0);
     const canSprint = wantsSprint && this.stamina > 0;
-    const speed = canSprint ? 7.5 : 4.5;
+    const movementConfig = PLAYER_CHARACTER_ASSETS[this.character.race];
+    const speed = canSprint
+      ? movementConfig?.runSpeed ?? 7.5
+      : movementConfig?.walkSpeed ?? 4.5;
     if (canSprint) this.stamina = Math.max(0, this.stamina - delta * 16);
     else this.stamina = Math.min(this.character.attributes.stamina, this.stamina + delta * 10);
 

@@ -24,6 +24,8 @@ export interface RiggedActorReview {
 export interface RiggedCharacterAssetConfig {
   path: string;
   targetHeight: number;
+  walkSpeed?: number;
+  runSpeed?: number;
   groundOffset?: number;
   rotationY?: number;
   animations: ActorAnimationMap;
@@ -94,6 +96,8 @@ export class GLTFCharacterRig implements CharacterRig {
     let hasSkinnedMesh = false;
     loaded.scene.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return;
+      object.castShadow = true;
+      object.receiveShadow = true;
       if (object instanceof THREE.SkinnedMesh) {
         hasSkinnedMesh = true;
         object.skeleton.bones.forEach((bone) => bones.add(bone));

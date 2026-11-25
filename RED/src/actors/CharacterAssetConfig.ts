@@ -4,6 +4,8 @@ import type { RiggedCharacterAssetConfig } from './GLTFCharacterRig';
 export const PATCH_ANIMATED_KNIGHT: RiggedCharacterAssetConfig = {
   path: 'assets/characters/patch-knight/animatedKnightInPlateArmour.glb',
   targetHeight: 1.85,
+  walkSpeed: 1.1,
+  runSpeed: 2.9,
   rotationY: 0,
   rootBoneName: 'pelvis',
   inPlaceRootMotionClips: ['Jump'],
