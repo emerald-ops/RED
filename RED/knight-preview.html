@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#101619" />
+    <meta name="description" content="Compare Patch's animated Knight in plate armour with the original and procedural R.E.D. Knight assets." />
+    <title>Patch Knight Comparison | R.E.D.</title>
+  </head>
+  <body>
+    <main class="studio">
+      <canvas id="knight-canvas" aria-label="Three-way 3D comparison of Patch's animated Knight and the original and V2 Nordic Knight models"></canvas>
+      <aside class="studio-panel">
+        <a class="wordmark" href="./index.html">R.E.D.</a>
+        <p class="eyebrow">REALM OF ETERNAL DRAGONS · MODEL COMPARISON</p>
+        <h1>Knight Comparison</h1>
+        <p class="description">Compare Patch's downloaded animated Knight against the preserved Nordic original and V2. All models load from their actual GLB exports.</p>
+        <div class="model-picker" aria-label="Models to display">
+          <button type="button" data-models="compare" aria-pressed="true">Compare</button>
+          <button type="button" data-models="patch" aria-pressed="false">Patch</button>
+          <button type="button" data-models="original" aria-pressed="false">Nordic</button>
+          <button type="button" data-models="redesigned" aria-pressed="false">Knight V2</button>
+        </div>
+        <p id="model-status" data-state="loading">LOADING PATCH, ORIGINAL, AND V2 GLBS…</p>
+        <div id="model-stats" class="model-stats"></div>
+        <div class="view-picker" aria-label="Camera views">
+          <button type="button" data-view="front" aria-pressed="true">Front</button>
+          <button type="button" data-view="side" aria-pressed="false">Side</button>
+          <button type="button" data-view="rear" aria-pressed="false">Back</button>
+          <button type="button" data-view="detail" aria-pressed="false">Detail</button>
+        </div>
+        <div class="rig-inspector">
+          <button id="skeleton-toggle" type="button" aria-pressed="false" disabled>Show skeleton</button>
+          <label for="animation-clip">Test a clip from the downloaded Patch Knight</label>
+          <select id="animation-clip" disabled aria-label="Patch Knight animation clip"></select>
+          <button id="animation-play" type="button" disabled>Play selected clip</button>
+          <p id="animation-status">Loading actual Patch GLB animation clips…</p>
+          <details>
+            <summary>Skeleton hierarchy &amp; bind positions</summary>
+            <pre id="bone-hierarchy">Waiting for the exported GLB…</pre>
+          </details>
+        </div>
+        <p class="studio-note">Drag to orbit · Scroll to zoom · The Patch GLB includes its own rig and animation clips. The Nordic original and V2 are static.</p>
+        <a class="back-link" href="./index.html">← Return to the valley</a>
+      </aside>
+      <p id="view-caption" class="view-caption">FRONT ELEVATION</p>
+    </main>
+    <script type="module" src="./src/knight-preview.ts"></script>
+  </body>
+</html>
