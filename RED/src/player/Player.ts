@@ -80,7 +80,10 @@ export class Player {
     this.captureDefaultWeaponParts(this.visualRig.model);
     const actorConfig = PLAYER_CHARACTER_ASSETS[this.character.race];
     this.weaponSocketName = actorConfig?.weaponSocketName ?? 'WeaponSocket';
-    if (actorConfig && this.assets) void this.loadImportedModel(actorConfig, this.assets);
+    if (actorConfig && this.assets) {
+      this.visualRig.model.visible = false;
+      void this.loadImportedModel(actorConfig, this.assets);
+    }
     this.attackTrailMaterial = new THREE.MeshBasicMaterial({
       color: 0xe7ca82,
       transparent: true,
@@ -114,7 +117,16 @@ export class Player {
   }
 
   private async loadImportedModel(config: RiggedCharacterAssetConfig, assets: AssetManager): Promise<void> {
-    const loaded = await assets.loadModel(config.path, () => new THREE.Group());
+    let loaded: LoadedModel;
+    try {
+      loaded = await assets.loadModel(config.path, () => new THREE.Group());
+    } catch (error) {
+      if (!this.disposed) {
+        this.visualRig.model.visible = true;
+        console.warn(`Keeping the procedural ${this.character.race} model: ${config.path} could not be loaded.`, error);
+      }
+      return;
+    }
     if (this.disposed) {
       assets.releaseModel(loaded.scene);
       return;
@@ -125,6 +137,7 @@ export class Player {
       importedRig = new GLTFCharacterRig(loaded, config, assets);
     } catch (error) {
       assets.releaseModel(loaded.scene);
+      this.visualRig.model.visible = true;
       console.warn(`Keeping the procedural ${this.character.race} model: ${config.path} was rejected.`, error);
       return;
     }
@@ -447,17 +460,54 @@ export class Player {
     );
     if (activeTrail) {
       const progress = 1 - this.attackEffectRemaining / 0.42;
-      const attackPhase = progress < 0.32
-        ? THREE.MathUtils.smoothstep(progress, 0, 0.32)
-        : progress < 0.7
-          ? THREE.MathUtils.smoothstep(progress, 0.32, 0.7)
-          : 1 - THREE.MathUtils.smoothstep(progress, 0.7, 1);
-      this.firstPersonWeapon.rotation.z += progress < 0.32
-        ? attackPhase * 0.2
-        : progress < 0.7
-          ? THREE.MathUtils.lerp(0.2, -0.82, attackPhase)
-          : THREE.MathUtils.lerp(-0.82, 0, attackPhase);
-      this.firstPersonWeapon.position.y -= Math.sin(progress * Math.PI) * 0.045;
+      let rotationX = -0.035;
+      let rotationY = 0.025 + Math.sin(this.elapsed * 3.2) * movementBlend * 0.018;
+      let rotationZ = 0.34;
+      let weaponX = 0.36 + Math.cos(this.elapsed * 4.5) * movementBlend * 0.009;
+      let weaponY = -0.34 + idleBob;
+      if (progress < 0.32) {
+        const windup = THREE.MathUtils.smoothstep(progress, 0, 0.32);
+        if (this.attackSequence === 1) {
+          rotationZ = THREE.MathUtils.lerp(0.34, -0.72, windup);
+          rotationX = THREE.MathUtils.lerp(-0.035, -0.42, windup);
+          weaponX = THREE.MathUtils.lerp(weaponX, 0.52, windup);
+        } else if (this.attackSequence === 2) {
+          rotationZ = THREE.MathUtils.lerp(0.34, -0.12, windup);
+          rotationX = THREE.MathUtils.lerp(-0.035, -1.15, windup);
+          weaponY = THREE.MathUtils.lerp(weaponY, -0.12, windup);
+        } else {
+          rotationZ = THREE.MathUtils.lerp(0.34, 0.95, windup);
+          rotationX = THREE.MathUtils.lerp(-0.035, -0.28, windup);
+          weaponX = THREE.MathUtils.lerp(weaponX, 0.48, windup);
+        }
+      } else if (progress < 0.7) {
+        const slash = THREE.MathUtils.smoothstep(progress, 0.32, 0.7);
+        if (this.attackSequence === 1) {
+          rotationZ = THREE.MathUtils.lerp(-0.72, -1.02, slash);
+          rotationX = THREE.MathUtils.lerp(-0.42, 0.38, slash);
+          weaponX = THREE.MathUtils.lerp(0.52, 0.05, slash);
+        } else if (this.attackSequence === 2) {
+          rotationZ = THREE.MathUtils.lerp(-0.12, 0.48, slash);
+          rotationX = THREE.MathUtils.lerp(-1.15, 0.82, slash);
+          weaponY = THREE.MathUtils.lerp(-0.12, -0.48, slash);
+        } else {
+          rotationZ = THREE.MathUtils.lerp(0.95, -0.88, slash);
+          rotationX = THREE.MathUtils.lerp(-0.28, 0.32, slash);
+          weaponX = THREE.MathUtils.lerp(0.48, 0.12, slash);
+        }
+      } else {
+        const recovery = THREE.MathUtils.smoothstep(progress, 0.7, 1);
+        const strikeZ = this.attackSequence === 1 ? -1.02 : this.attackSequence === 2 ? 0.48 : -0.88;
+        const strikeX = this.attackSequence === 1 ? 0.38 : this.attackSequence === 2 ? 0.82 : 0.32;
+        const strikeXPos = this.attackSequence === 0 ? 0.12 : this.attackSequence === 1 ? 0.05 : 0.36;
+        const strikeYPos = this.attackSequence === 2 ? -0.48 : weaponY;
+        rotationZ = THREE.MathUtils.lerp(strikeZ, 0.34, recovery);
+        rotationX = THREE.MathUtils.lerp(strikeX, -0.035, recovery);
+        weaponX = THREE.MathUtils.lerp(strikeXPos, 0.36, recovery);
+        weaponY = THREE.MathUtils.lerp(strikeYPos, -0.34 + idleBob, recovery);
+      }
+      this.firstPersonWeapon.position.set(weaponX, weaponY, -0.72);
+      this.firstPersonWeapon.rotation.set(rotationX, rotationY, rotationZ);
       this.attackTrailMaterial.opacity = (1 - progress) * 0.84;
       this.attackTrail.rotation.z = -1.08 + progress * 2.16;
       this.firstPersonAttackTrail.rotation.z = -1.08 + progress * 2.16;

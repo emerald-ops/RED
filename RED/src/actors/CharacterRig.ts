@@ -605,22 +605,22 @@ export function createCharacterRig(race: Race): CharacterRig {
         const swing = -Math.sin(gait + (side < 0 ? 0 : Math.PI)) * stride * 0.55;
         const guarded = THREE.MathUtils.lerp(THREE.MathUtils.lerp(swing, -1.05, blockBlend), -0.55, jumpBlend);
         const attackProgress = 1 - attackTime / 0.42;
-        const windupX = attackSequence === 2 ? -2.05 : -1.45;
-        const windupZ = attackSequence === 1 ? 1.2 : 0.75;
-        const followX = attackSequence === 2 ? 1.05 : 0.55;
-        const followZ = attackSequence === 1 ? -1.25 : -0.8;
+        const windupX = attackSequence === 2 ? -2.05 : attackSequence === 1 ? -1.15 : -1.45;
+        const windupZ = attackSequence === 1 ? 1.05 : 0.75;
+        const followX = attackSequence === 2 ? 1.05 : attackSequence === 1 ? 0.85 : 0.55;
+        const followZ = attackSequence === 1 ? -1.25 : attackSequence === 2 ? -0.35 : -0.8;
         let attackX: number;
         let attackZ: number;
         if (attackProgress < 0.32) {
-          const windup = attackProgress / 0.32;
+          const windup = THREE.MathUtils.smoothstep(attackProgress, 0, 0.32);
           attackX = THREE.MathUtils.lerp(-0.35, windupX, windup);
           attackZ = THREE.MathUtils.lerp(0.12, windupZ, windup);
         } else if (attackProgress < 0.7) {
-          const slash = (attackProgress - 0.32) / 0.38;
+          const slash = THREE.MathUtils.smoothstep(attackProgress, 0.32, 0.7);
           attackX = THREE.MathUtils.lerp(windupX, followX, slash);
           attackZ = THREE.MathUtils.lerp(windupZ, followZ, slash);
         } else {
-          const recovery = (attackProgress - 0.7) / 0.3;
+          const recovery = THREE.MathUtils.smoothstep(attackProgress, 0.7, 1);
           attackX = THREE.MathUtils.lerp(followX, 0.1, recovery);
           attackZ = THREE.MathUtils.lerp(followZ, 0, recovery);
         }

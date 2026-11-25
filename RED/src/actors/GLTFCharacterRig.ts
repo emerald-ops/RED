@@ -221,7 +221,10 @@ export class GLTFCharacterRig implements CharacterRig {
   private playTransient(state: ActorAnimationState, sequence: number): void {
     const action = this.resolveAction(state, sequence);
     if (!action) return;
-    if (this.activeAction === action && this.activeTransient === state) return;
+    if (this.activeAction === action
+      && this.activeTransient === state
+      && action.isRunning()
+      && action.time < action.getClip().duration - 0.04) return;
     this.activeAction?.fadeOut(0.12);
     action.reset();
     action.setLoop(THREE.LoopOnce, 1);
