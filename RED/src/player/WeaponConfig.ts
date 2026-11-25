@@ -3,7 +3,7 @@ export interface WeaponAssetConfig {
   targetHeight: number;
   damageMultiplier: number;
   gripEnd: 'min-z' | 'max-z';
-  thirdPersonRotationX: number;
+  weaponRotationX: number;
 }
 
 export const EQUIPPABLE_WEAPONS: Readonly<Record<string, WeaponAssetConfig>> = {
@@ -12,21 +12,21 @@ export const EQUIPPABLE_WEAPONS: Readonly<Record<string, WeaponAssetConfig>> = {
     targetHeight: 0.95,
     damageMultiplier: 1.15,
     gripEnd: 'max-z',
-    thirdPersonRotationX: -Math.PI / 2,
+    weaponRotationX: Math.PI / 2,
   },
   'Ornate Sword': {
     path: 'assets/weapons/medieval-pack-1/ornate-sword.glb',
     targetHeight: 1.05,
     damageMultiplier: 1.28,
     gripEnd: 'max-z',
-    thirdPersonRotationX: -Math.PI / 2,
+    weaponRotationX: Math.PI / 2,
   },
   Dagger: {
     path: 'assets/weapons/medieval-pack-1/dagger.glb',
     targetHeight: 0.68,
     damageMultiplier: 0.9,
     gripEnd: 'min-z',
-    thirdPersonRotationX: Math.PI / 2,
+    weaponRotationX: -Math.PI / 2,
   },
 };
 

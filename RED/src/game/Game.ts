@@ -337,7 +337,7 @@ export class Game {
     this.comboStep = sequence;
     this.comboWindow = 1.15;
     this.attackCooldown = sequence === 2 ? 0.58 : 0.34;
-    player.attackAnimation(sequence);
+    const impactDelay = player.attackAnimation(sequence);
     const forward = new THREE.Vector3(-Math.sin(player.cameraManager.yaw), 0, -Math.cos(player.cameraManager.yaw));
     const target = this.creatures!.creatures
       .filter((creature) => creature.mood !== 'dead' && creature.mood !== 'tamed')
@@ -355,7 +355,7 @@ export class Game {
       damage,
       direction: target.offset.normalize(),
       sequence,
-      remaining: [0.24, 0.27, 0.3][sequence],
+      remaining: impactDelay,
     };
   }
 

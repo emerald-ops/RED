@@ -26,6 +26,8 @@ export interface RiggedCharacterAssetConfig {
   targetHeight: number;
   walkSpeed?: number;
   runSpeed?: number;
+  attackDurations?: readonly [number, number, number];
+  attackBoneNames?: readonly string[];
   groundOffset?: number;
   rotationY?: number;
   animations: ActorAnimationMap;
@@ -76,9 +78,14 @@ export class GLTFCharacterRig implements CharacterRig {
   private readonly mixer: THREE.AnimationMixer;
   private readonly actions = new Map<string, THREE.AnimationAction>();
   private readonly animationByName: Map<string, THREE.AnimationClip>;
+  private readonly bones = new Map<string, THREE.Bone>();
+  private readonly attackActions: THREE.AnimationAction[] = [];
   private activeAction: THREE.AnimationAction | null = null;
+  private activeAttackAction: THREE.AnimationAction | null = null;
   private activeTransient: ActorAnimationState | null = null;
   private locomotionState: ActorAnimationState = 'idle';
+  private attackSequence = 0;
+  private blockBlend = 0;
   private disposed = false;
 
   constructor(
@@ -95,6 +102,7 @@ export class GLTFCharacterRig implements CharacterRig {
     let maxTextureSize = 0;
     let hasSkinnedMesh = false;
     loaded.scene.traverse((object) => {
+      if (object instanceof THREE.Bone) this.bones.set(object.name, object);
       if (!(object instanceof THREE.Mesh)) return;
       object.castShadow = true;
       object.receiveShadow = true;
@@ -172,6 +180,38 @@ export class GLTFCharacterRig implements CharacterRig {
     if (missingClips.length) {
       throw new Error(`Configured character animations are missing from the GLB: ${missingClips.join(', ')}.`);
     }
+    if (config.attackBoneNames?.length) {
+      const missingBones = config.attackBoneNames.filter((name) => !this.bones.has(name));
+      if (missingBones.length) {
+        throw new Error(`Configured procedural attack bones are missing from the GLB: ${missingBones.join(', ')}.`);
+      }
+      const attackMapping = config.animations.attack;
+      const attackClipName = typeof attackMapping === 'string' ? attackMapping : attackMapping?.[0];
+      const sourceClip = attackClipName ? this.animationByName.get(attackClipName) : undefined;
+      if (!sourceClip) throw new Error('Configured procedural attacks require an existing attack animation clip.');
+      const attackBoneNames = new Set(config.attackBoneNames);
+      const attackTracks = sourceClip.tracks
+        .filter((track) => {
+          const separator = track.name.indexOf('.');
+          return separator !== -1
+            && attackBoneNames.has(track.name.slice(0, separator))
+            && track.name.endsWith('.quaternion');
+        })
+        .map((track) => track.clone());
+      if (!attackTracks.length) {
+        throw new Error(`The "${sourceClip.name}" clip has no rotation tracks for the configured attack bones.`);
+      }
+      for (let sequence = 0; sequence < 3; sequence++) {
+        const clip = new THREE.AnimationClip(
+          `${sourceClip.name}-Combo-${sequence + 1}`,
+          sourceClip.duration,
+          attackTracks.map((track) => track.clone()),
+          THREE.AdditiveAnimationBlendMode,
+        );
+        THREE.AnimationUtils.makeClipAdditive(clip, 0, sourceClip);
+        this.attackActions.push(this.mixer.clipAction(clip));
+      }
+    }
   }
 
   update(
@@ -191,21 +231,36 @@ export class GLTFCharacterRig implements CharacterRig {
       this.activeTransient = null;
       this.activeAction = null;
     }
-    this.locomotionState = blocking
-      ? 'block'
-      : movement > 0.01
-        ? sprinting ? 'run' : 'walk'
-        : 'idle';
+    this.locomotionState = movement > 0.01
+      ? sprinting ? 'run' : 'walk'
+      : 'idle';
 
-    const transient = dead ? 'death' : takingDamage ? 'hit' : attacking ? 'attack' : jumping ? 'jump' : null;
+    this.blockBlend = THREE.MathUtils.damp(this.blockBlend, blocking ? 1 : 0, 12, delta);
+    if (attacking && this.activeTransient === 'jump') {
+      this.activeAction?.fadeOut(0.1);
+      this.activeAction = null;
+      this.activeTransient = null;
+    }
+    const transient = dead ? 'death' : takingDamage ? 'hit' : jumping && !attacking ? 'jump' : null;
     if (transient) this.playTransient(transient, attackSequence);
     else if (this.activeTransient && this.activeTransient !== 'death' && !this.activeAction?.isRunning()) {
       this.activeTransient = null;
       this.activeAction = null;
     }
 
+    if (attacking && !dead && !takingDamage) this.playAttack(attackSequence);
+    else if ((dead || takingDamage || (jumping && !attacking)) && this.activeAttackAction) {
+      this.activeAttackAction.fadeOut(0.1);
+      this.activeAttackAction = null;
+    }
+    if (this.activeAttackAction && !this.activeAttackAction.isRunning()) {
+      this.activeAttackAction.fadeOut(0.12);
+      this.activeAttackAction = null;
+    }
+
     if (!this.activeTransient) this.playLoop(this.locomotionState);
     this.mixer.update(delta);
+    this.applyProceduralPose();
   }
 
   dispose(): void {
@@ -215,7 +270,66 @@ export class GLTFCharacterRig implements CharacterRig {
     this.mixer.uncacheRoot(this.loaded.scene);
     this.assets.releaseModel(this.loaded.scene);
     this.actions.clear();
+    this.attackActions.length = 0;
+    this.bones.clear();
     this.model.clear();
+  }
+
+  private playAttack(sequence: number): void {
+    if (!this.attackActions.length) return;
+    const action = this.attackActions[sequence % this.attackActions.length];
+    const previous = this.activeAttackAction;
+    action.reset();
+    action.setLoop(THREE.LoopOnce, 1);
+    action.clampWhenFinished = true;
+    const duration = this.config.attackDurations?.[sequence % 3] ?? 0.58;
+    action.setEffectiveTimeScale(action.getClip().duration / duration);
+    if (previous && previous !== action) action.crossFadeFrom(previous, 0.08, false).play();
+    else action.fadeIn(0.08).play();
+    this.activeAttackAction = action;
+    this.attackSequence = sequence % 3;
+  }
+
+  private applyProceduralPose(): void {
+    const action = this.activeAttackAction;
+    if (action) {
+      const progress = THREE.MathUtils.clamp(action.time / action.getClip().duration, 0, 1);
+      const windup = 1 - THREE.MathUtils.smoothstep(progress, 0, 0.34);
+      const strike = Math.sin(Math.PI * THREE.MathUtils.clamp((progress - 0.2) / 0.62, 0, 1));
+      if (this.attackSequence === 0) {
+        this.rotateBone('chest', 0.02 * strike, -0.12 * strike, 0.04 * strike);
+        this.rotateBone('upperarm_R', 0, 0, 0.08 * strike);
+        this.rotateBone('forearm_R', 0, 0.05 * strike, 0);
+        this.rotateBone('hand_R', 0.05 * strike, 0, 0);
+      } else if (this.attackSequence === 1) {
+        this.rotateBone('chest', 0, 0.24 * windup - 0.4 * strike, 0.1 * strike);
+        this.rotateBone('upperarm_R', 0, 0, 0.2 * strike);
+        this.rotateBone('forearm_R', 0, -0.28 * strike, 0);
+        this.rotateBone('hand_R', 0, 0.16 * strike, -0.1 * strike);
+      } else if (this.attackSequence === 2) {
+        this.rotateBone('chest', -0.18 * windup + 0.28 * strike, -0.24 * windup + 0.32 * strike, 0);
+        this.rotateBone('upperarm_R', -0.25 * windup + 0.28 * strike, 0, 0.18 * strike);
+        this.rotateBone('forearm_R', 0.16 * strike, 0, -0.3 * strike);
+        this.rotateBone('hand_R', -0.15 * strike, 0, 0.18 * strike);
+      }
+    }
+
+    const blockWeight = this.blockBlend * (action ? 0.2 : 1);
+    if (blockWeight > 0.001) {
+      this.rotateBone('chest', -0.04 * blockWeight, -0.08 * blockWeight, 0);
+      this.rotateBone('upperarm_R', -0.12 * blockWeight, 0, -0.28 * blockWeight);
+      this.rotateBone('forearm_R', -0.18 * blockWeight, 0, -0.12 * blockWeight);
+      this.rotateBone('upperarm_L', -0.16 * blockWeight, 0, 0.22 * blockWeight);
+      this.rotateBone('forearm_L', -0.2 * blockWeight, 0, 0.12 * blockWeight);
+    }
+  }
+
+  private rotateBone(name: string, x: number, y: number, z: number): void {
+    const bone = this.bones.get(name);
+    if (!bone) return;
+    bone.quaternion.multiply(
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z, 'XYZ')),
+    ).normalize();
   }
 
   private playTransient(state: ActorAnimationState, sequence: number): void {

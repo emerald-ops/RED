@@ -36,6 +36,7 @@ export class Player {
   private weaponSocketName = 'WeaponSocket';
   private equippedWeaponName: string | null = null;
   private attackEffectRemaining = 0;
+  private attackEffectDuration = 0.42;
   private attackSequence = 0;
   private elapsed = 0;
   private disposed = false;
@@ -79,7 +80,6 @@ export class Player {
     this.model.add(this.visualRig.model);
     this.captureDefaultWeaponParts(this.visualRig.model);
     const actorConfig = PLAYER_CHARACTER_ASSETS[this.character.race];
-    this.weaponSocketName = actorConfig?.weaponSocketName ?? 'WeaponSocket';
     if (actorConfig && this.assets) {
       this.visualRig.model.visible = false;
       void this.loadImportedModel(actorConfig, this.assets);
@@ -134,6 +134,10 @@ export class Player {
 
     let importedRig: GLTFCharacterRig;
     try {
+      const weaponSocketName = config.weaponSocketName ?? 'WeaponSocket';
+      if (!(loaded.scene.getObjectByName(weaponSocketName) instanceof THREE.Bone)) {
+        throw new Error(`The weapon socket "${weaponSocketName}" is not a bone in the character model.`);
+      }
       importedRig = new GLTFCharacterRig(loaded, config, assets);
     } catch (error) {
       assets.releaseModel(loaded.scene);
@@ -143,9 +147,10 @@ export class Player {
     }
 
     const previousRig = this.visualRig;
+    this.weaponSocketName = config.weaponSocketName ?? 'WeaponSocket';
     this.attackTrail.removeFromParent();
-    const weaponSocket = importedRig.model.getObjectByName(config.weaponSocketName ?? 'WeaponSocket')
-      ?? importedRig.model;
+    const weaponSocket = importedRig.model.getObjectByName(config.weaponSocketName ?? 'WeaponSocket');
+    if (!weaponSocket) throw new Error(`The weapon socket "${config.weaponSocketName ?? 'WeaponSocket'}" disappeared after rig setup.`);
     weaponSocket.add(this.attackTrail);
     this.model.remove(previousRig.model);
     this.visualRig = importedRig;
@@ -319,7 +324,7 @@ export class Player {
       const gripZ = config.gripEnd === 'min-z' ? bounds.min.z : bounds.max.z;
       loaded.scene.position.set(-center.x, -center.y, -gripZ);
       const root = new THREE.Group();
-      root.rotation.x = firstPersonView ? -config.thirdPersonRotationX : config.thirdPersonRotationX;
+      root.rotation.x = config.weaponRotationX;
       root.scale.setScalar(config.targetHeight / size.z);
       root.position.y = config.targetHeight * (firstPersonView ? 0.2 : 0.16);
       root.add(loaded.scene);
@@ -355,7 +360,9 @@ export class Player {
   private mountThirdPersonWeapon(rig: THREE.Object3D, socketName = 'WeaponSocket'): void {
     if (!this.thirdPersonWeapon) return;
     const socket = rig.getObjectByName(socketName);
-    if (!socket) return;
+    if (!(socket instanceof THREE.Bone)) {
+      throw new Error(`Could not attach the equipped weapon: "${socketName}" is not a character bone.`);
+    }
     for (const part of this.defaultWeaponParts) part.visible = false;
     socket.add(this.thirdPersonWeapon.root);
   }
@@ -459,7 +466,7 @@ export class Player {
       0.34,
     );
     if (activeTrail) {
-      const progress = 1 - this.attackEffectRemaining / 0.42;
+      const progress = 1 - this.attackEffectRemaining / this.attackEffectDuration;
       let rotationX = -0.035;
       let rotationY = 0.025 + Math.sin(this.elapsed * 3.2) * movementBlend * 0.018;
       let rotationZ = 0.34;
@@ -523,10 +530,11 @@ export class Player {
     this.cameraManager.update(this.model, look.x, look.y, delta, 0.003, raceCameraHeight.eye, raceCameraHeight.target);
   }
 
-  attackAnimation(sequence = 0): void {
+  attackAnimation(sequence = 0): number {
     this.attackSequence = sequence % 3;
     this.attackPending = true;
-    this.attackEffectRemaining = 0.42;
+    this.attackEffectDuration = PLAYER_CHARACTER_ASSETS[this.character.race]?.attackDurations?.[this.attackSequence] ?? 0.42;
+    this.attackEffectRemaining = this.attackEffectDuration;
     this.attackTrailMaterial.color.setHex([0xffd66b, 0xff9d55, 0x9fe8ff][this.attackSequence]);
     this.attackTrail.scale.setScalar(1);
     this.firstPersonAttackTrail.scale.setScalar(1);
@@ -534,6 +542,7 @@ export class Player {
     this.firstPersonAttackTrail.rotation.z = -1.08;
     this.attackTrail.visible = this.cameraManager.mode !== 'first-person';
     this.firstPersonAttackTrail.visible = this.cameraManager.mode === 'first-person';
+    return this.attackEffectDuration * 0.44;
   }
 
   takeDamage(amount: number): void {
