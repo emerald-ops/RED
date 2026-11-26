@@ -7,6 +7,8 @@ import { SaveManager } from '../core/SaveManager';
 import { createCharacter, type CharacterData, type GameLocation, type Race } from '../core/types';
 import { CreatureSystem } from '../creatures/CreatureSystem';
 import type { Creature } from '../creatures/Creature';
+import type { DragonBossStyle } from '../creatures/CreatureAssetConfig';
+import { DRAGON_BOSSES } from '../creatures/CreatureAssetConfig';
 import { ArcaneSpellSystem } from './ArcaneSpellSystem';
 import { loadCreatureAsset, type GLTFCreatureRig } from '../creatures/CreatureAssetLoader';
 import { TYRANNOSAURUS_TEST_ASSET } from '../creatures/CreatureAssetConfig';
@@ -64,6 +66,7 @@ export class Game {
   private disposed = false;
   private lastFrame = 0;
   private attackCooldown = 0;
+  private frostSlowRemaining = 0;
   private comboStep = 0;
   private comboWindow = 0;
   private pendingAttack: PendingAttack | null = null;
@@ -258,6 +261,8 @@ export class Game {
     this.respawnTimer = Math.max(0, this.respawnTimer - delta);
     this.autoSaveTimer += delta;
     const look = this.input.takeLookDelta();
+    this.frostSlowRemaining = Math.max(0, this.frostSlowRemaining - delta);
+    player.movementMultiplier = this.frostSlowRemaining > 0 ? 0.62 : 1;
     if (this.input.cameraPressed) {
       player.cameraManager.toggle();
       this.ui.toastMessage(`Camera · ${player.cameraManager.mode}`);
@@ -277,8 +282,13 @@ export class Game {
     creatures.update(
       delta,
       position,
-      (damage) => {
+      (damage, style?: DragonBossStyle) => {
         player.takeDamage(damage);
+        if (style === 'ice') {
+          this.frostSlowRemaining = Math.max(this.frostSlowRemaining, 2.4);
+          player.movementMultiplier = 0.62;
+          this.ui.toastMessage('Frostbite · movement slowed.');
+        }
         if (player.health <= 0 && this.respawnTimer === 0) this.handleDeath();
       },
       (creature) => this.rewardCreature(creature),
@@ -314,7 +324,7 @@ export class Game {
     this.updatePrompt();
     this.physics.step();
     const boss = creatures.creatures.find((creature) =>
-      creature.bossId && creature.mood !== 'dead' && creature.model.position.distanceTo(position) < 32,
+      creature.bossId && creature.mood !== 'dead',
     );
     this.ui.update({
       character: player.character,
@@ -578,13 +588,6 @@ export class Game {
       this.transitionTo(portal.destination);
       return;
     }
-    if (this.creatures!.tameNearest(player.model.position)) {
-      player.character.companions = 1;
-      player.character.inventory.push('Wolf companion');
-      this.ui.toastMessage('The wolf trusts you now. Your companion follows your path.');
-      void this.persist();
-      return;
-    }
     const dropIndex = this.lootDrops.findIndex(({ mesh }) => mesh.position.distanceTo(player.model.position) < 2.7);
     if (dropIndex !== -1) {
       const [drop] = this.lootDrops.splice(dropIndex, 1);
@@ -665,22 +668,19 @@ export class Game {
     const character = player?.character;
     if (!character || !creature.bossId || character.tower.defeatedBosses.includes(creature.bossId)) return;
     character.tower.defeatedBosses.push(creature.bossId);
-    if (creature.bossId === 'ancient-wolf') {
-      if (!character.tower.unlockedFloors.includes(2)) character.tower.unlockedFloors.push(2);
-      if (!character.inventory.includes('Ancient Wolf Sigil')) character.inventory.push('Ancient Wolf Sigil');
-      if (!character.inventory.includes('Ornate Sword')) character.inventory.push('Ornate Sword');
-    } else if (creature.bossId === 'eternal-phoenix' && !character.tower.unlockedFloors.includes(3)) {
-      character.tower.unlockedFloors.push(3);
-      character.inventory.push('Phoenix Ember');
-    } else if (creature.bossId === 'eternal-dragon') {
-      character.inventory.push('Eternal Dragon Heart');
+    const defeatedDragon = DRAGON_BOSSES.find(({ id }) => id === creature.bossId);
+    if (defeatedDragon && defeatedDragon.floor < DRAGON_BOSSES.length) {
+      const nextFloor = defeatedDragon.floor + 1;
+      if (!character.tower.unlockedFloors.includes(nextFloor)) character.tower.unlockedFloors.push(nextFloor);
+    }
+    if (defeatedDragon) {
+      const reward = `${defeatedDragon.name} Scale`;
+      if (!character.inventory.includes(reward)) character.inventory.push(reward);
     }
     this.addExperience(300);
-    const message = creature.bossId === 'eternal-dragon'
-      ? 'Eternal Dragon defeated · the tower is cleared.'
-      : creature.bossId === 'ancient-wolf'
-        ? 'Ancient Wolf defeated · Floor 2 unlocked · Ornate Sword recovered.'
-        : `${creature.bossName} defeated · the next tower portal awakens.`;
+    const message = defeatedDragon?.floor === DRAGON_BOSSES.length
+      ? `${creature.bossName} defeated · the dragon tower is cleared.`
+      : `${creature.bossName} defeated · the next tower floor awakens.`;
     await this.persist();
     if (!this.disposed && this.playing && this.player?.character === character) {
       this.pendingBossReturn = message;
@@ -744,14 +744,6 @@ export class Game {
       this.promptText = locked
         ? `E · ${portal.label} sealed`
         : `E · ${portal.label}`;
-      return;
-    }
-    const wolf = this.creatures!.creatures.find((creature) =>
-      creature.kind === 'wolf' && creature.mood === 'hostile' && creature.health <= 24
-      && creature.model.position.distanceTo(position) < 3,
-    );
-    if (wolf) {
-      this.promptText = 'E · Tame weakened wolf';
       return;
     }
     const drop = this.lootDrops.find(({ mesh }) => mesh.position.distanceTo(position) < 2.7);

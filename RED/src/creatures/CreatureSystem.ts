@@ -3,10 +3,11 @@ import type * as RAPIER from '@dimforge/rapier3d-compat';
 import type { AssetManager } from '../core/AssetManager';
 import type { CharacterData, GameLocation } from '../core/types';
 import { Creature, type CreatureBossConfig } from './Creature';
+import { DragonCombatSystem } from './DragonCombatSystem';
+import type { DragonBossStyle } from './CreatureAssetConfig';
 import {
-  ANCIENT_WOLF_BOSS_ASSET,
-  ETERNAL_DRAGON_BOSS_ASSET,
-  ETERNAL_PHOENIX_BOSS_ASSET,
+  DIREWOLF_COMPANION_ASSET,
+  DRAGON_BOSSES,
   GLOOM_STALKER_ASSET,
   HOLLOW_WARDEN_ASSET,
 } from './CreatureAssetConfig';
@@ -21,6 +22,8 @@ export class CreatureSystem {
   private spiritAttackTimer = 0;
   private spiritLife = 0;
   private readonly rewarded = new Set<Creature>();
+  private readonly dragonCombat: DragonCombatSystem;
+  private companionRecoverRemaining = 0;
   companion: Creature | null = null;
 
   constructor(
@@ -31,6 +34,7 @@ export class CreatureSystem {
     private readonly surfaceHeightAt: (x: number, z: number) => number = () => 0,
     location: GameLocation = 'floor1',
   ) {
+    this.dragonCombat = new DragonCombatSystem(scene, surfaceHeightAt);
     if (location === 'floor1') {
       this.spawn('wolf', new THREE.Vector3(-8, 0, 3));
       this.spawn('wolf', new THREE.Vector3(10, 0, -16));
@@ -39,49 +43,28 @@ export class CreatureSystem {
       this.spawn('bear', new THREE.Vector3(23, 0, 12));
       this.spawn('bear', new THREE.Vector3(-28, 0, -23));
       this.spawn('bear', new THREE.Vector3(-22, 0, -24), null, GLOOM_STALKER_ASSET);
-      if (!character.tower.defeatedBosses.includes('ancient-wolf')) {
-        this.spawn('wolf', new THREE.Vector3(0, 0, -27), {
-          id: 'ancient-wolf',
-          name: 'Ancient Wolf',
-          health: 420,
-          damage: 22,
-          range: 2.8,
-          size: 1.85,
-          modelHeight: 2.45,
-        }, ANCIENT_WOLF_BOSS_ASSET);
-      }
     } else if (location === 'floor2') {
       this.spawn('bear', new THREE.Vector3(7, 0, -14), null, HOLLOW_WARDEN_ASSET);
-      if (!character.tower.defeatedBosses.includes('eternal-phoenix')) {
-        this.spawn('bear', new THREE.Vector3(0, 0, -27), {
-          id: 'eternal-phoenix',
-          name: 'Eternal Phoenix',
-          health: 560,
-          damage: 25,
-          range: 9,
-          size: 1.8,
-          modelHeight: 2.5,
-          hoverHeight: 1.1,
-        }, ETERNAL_PHOENIX_BOSS_ASSET);
-      }
     } else if (location === 'floor3') {
-      if (!character.tower.defeatedBosses.includes('eternal-dragon')) {
-        this.spawn('bear', new THREE.Vector3(0, 0, -27), {
-          id: 'eternal-dragon',
-          name: 'Eternal Dragon',
-          health: 760,
-          damage: 32,
-          range: 4.2,
-          size: 2.1,
-          modelHeight: 3.2,
-        }, ETERNAL_DRAGON_BOSS_ASSET);
-      }
+      this.spawn('bear', new THREE.Vector3(7, 0, -14), null, HOLLOW_WARDEN_ASSET);
     }
-    if (character.companions > 0) {
-      const companion = this.spawn('wolf', new THREE.Vector3(1.2, 0, 14));
-      companion.tame();
-      this.companion = companion;
+    const floor = location === 'hub' ? 0 : Number(location.slice(-1));
+    const boss = DRAGON_BOSSES.find((definition) => definition.floor === floor);
+    if (boss && !character.tower.defeatedBosses.includes(boss.id)) {
+      this.spawn('bear', new THREE.Vector3(0, 0, -21), {
+        id: boss.id,
+        name: boss.name,
+        style: boss.style,
+        health: boss.health,
+        damage: boss.damage,
+        range: boss.range,
+        size: boss.size,
+        modelHeight: boss.modelHeight,
+      }, boss.asset);
     }
+    const companion = this.spawn('wolf', new THREE.Vector3(-1.8, 0, 15.2), null, DIREWOLF_COMPANION_ASSET);
+    companion.tame();
+    this.companion = companion;
   }
 
   private spawn(
@@ -99,37 +82,76 @@ export class CreatureSystem {
   update(
     delta: number,
     playerPosition: THREE.Vector3,
-    damagePlayer: (damage: number) => void,
+    damagePlayer: (damage: number, style?: DragonBossStyle) => void,
     reward: (creature: Creature) => void,
   ): void {
     this.spiritCooldown = Math.max(0, this.spiritCooldown - delta);
     this.spiritAttackTimer -= delta;
+    const companion = this.companion;
+    const companionTarget = companion && companion.mood !== 'dead'
+      ? this.creatures.find((creature) =>
+        (creature.kind === 'wolf' || creature.kind === 'bear')
+        && creature !== companion
+        && creature.mood !== 'dead' && creature.mood !== 'tamed'
+        && (creature.bossId !== null || creature.model.position.distanceTo(playerPosition) < 13)
+        && creature.model.position.distanceTo(companion.model.position) < 12,
+      ) ?? null
+      : null;
     for (const creature of this.creatures) {
-      creature.update(delta, playerPosition, { damagePlayer });
-      if (creature.defeatReady && !this.rewarded.has(creature)) {
+      creature.update(delta, playerPosition, {
+        damagePlayer: (damage, style) => damagePlayer(damage, style),
+        damageCompanion: (damage) => {
+          if (creature.bossId && this.companion && this.companion.mood !== 'dead') {
+            this.companion.takeDamage(damage);
+          }
+        },
+        companionPosition: this.companion?.mood === 'dead' ? null : this.companion?.model.position,
+        companionTarget: creature === companion ? companionTarget?.model.position ?? null : null,
+        companionAttack: creature === companion && companionTarget
+          ? () => companionTarget.takeDamage(8, companionTarget.model.position.clone().sub(creature.model.position))
+          : undefined,
+        bossAttack: (attack) => this.dragonCombat.launch(attack),
+      });
+      if (creature !== this.companion && creature.defeatReady && !this.rewarded.has(creature)) {
         this.rewarded.add(creature);
         reward(creature);
       }
     }
-    if (this.companion && this.companion.mood !== 'dead') {
-      const distance = this.companion.model.position.distanceTo(playerPosition);
-      const target = this.creatures.find((creature) =>
-        (creature.kind === 'wolf' || creature.kind === 'bear')
-        && creature.mood !== 'dead' && creature.mood !== 'tamed'
-        && creature.model.position.distanceTo(this.companion!.model.position) < 7,
-      );
-      if (target && this.companion.model.position.distanceTo(target.model.position) < 1.8 && this.companion.attackCooldown <= 0) {
-        target.takeDamage(6);
-        this.companion.attackCooldown = 1;
-      }
-      if (distance > 20) {
-        this.companion.body.setTranslation({
-          x: playerPosition.x - 1,
-          y: this.companion.groundHeightAt(playerPosition.x - 1, playerPosition.z - 1),
-          z: playerPosition.z - 1,
-        }, true);
+    if (companion) {
+      const distance = companion.model.position.distanceTo(playerPosition);
+      if (companion.mood === 'dead') {
+        companion.companionState = 'Recovering';
+        this.companionRecoverRemaining = this.companionRecoverRemaining || 12;
+        this.companionRecoverRemaining = Math.max(0, this.companionRecoverRemaining - delta);
+        if (this.companionRecoverRemaining === 0) {
+          companion.reviveCompanion(playerPosition.clone().add(new THREE.Vector3(-1.5, 0, 1.5)));
+          this.companionRecoverRemaining = 0;
+        }
+      } else {
+        if (companionTarget) {
+          const targetDistance = companion.model.position.distanceTo(companionTarget.model.position);
+          companion.companionState = targetDistance < 3.2 ? 'Attacking' : 'Alert';
+        } else if (distance > 24) {
+          companion.companionState = 'Returning';
+          const x = playerPosition.x - 1.4;
+          const z = playerPosition.z + 1.2;
+          companion.body.setTranslation({
+            x,
+            y: companion.groundHeightAt(x, z),
+            z,
+          }, true);
+        } else {
+          companion.companionState = distance > 3.2 ? 'Following' : 'Exploring';
+        }
       }
     }
+    this.dragonCombat.update(
+      delta,
+      playerPosition,
+      damagePlayer,
+      this.companion?.mood === 'dead' ? null : this.companion?.model.position ?? null,
+      (damage) => this.companion?.takeDamage(damage),
+    );
     if (this.spirit) {
       this.spiritLife -= delta;
       const spiritX = playerPosition.x + Math.sin(this.spiritLife * 1.4) * 0.8;
@@ -154,17 +176,6 @@ export class CreatureSystem {
       }
       if (this.spiritLife <= 0) this.dismissSpirit();
     }
-  }
-
-  tameNearest(playerPosition: THREE.Vector3): boolean {
-    const wolf = this.creatures.find((creature) =>
-      creature.kind === 'wolf' && creature.mood === 'hostile' && creature.health <= 24
-      && creature.model.position.distanceTo(playerPosition) < 3,
-    );
-    if (!wolf) return false;
-    wolf.tame();
-    this.companion = wolf;
-    return true;
   }
 
   summonSpirit(playerPosition: THREE.Vector3): boolean {
@@ -235,6 +246,7 @@ export class CreatureSystem {
 
   dispose(): void {
     this.dismissSpirit();
+    this.dragonCombat.dispose();
     for (const creature of this.creatures) {
       this.scene.remove(creature.model);
       creature.dispose();

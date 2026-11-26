@@ -105,7 +105,13 @@ export class SaveManager {
       }
       throw new Error(`No migration exists for save version ${record.version}.`);
     }
-    if (record.version !== saved.version) await this.save(record.character);
+    let needsSave = record.version !== saved.version;
+    const tower = normalizeTowerProgression(record.character.tower, 'hub');
+    if (JSON.stringify(tower) !== JSON.stringify(record.character.tower)) {
+      record = { ...record, character: { ...record.character, tower } };
+      needsSave = true;
+    }
+    if (needsSave) await this.save(record.character);
     return record.character;
   }
 

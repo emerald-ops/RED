@@ -17,7 +17,7 @@ export class World {
   readonly spawn = new THREE.Vector3(0, 0, 13);
   readonly landmarks: Array<{ name: string; position: THREE.Vector3 }>;
   readonly portals: WorldPortal[];
-  readonly bossSpawn = new THREE.Vector3(0, 0, -27);
+  readonly bossSpawn = new THREE.Vector3(0, 0, -21);
   private readonly environment: WorldEnvironment;
 
   constructor(
@@ -39,9 +39,10 @@ export class World {
       ? [
         { label: 'Forsaken Wilds', destination: 'floor1', floor: 1, position: new THREE.Vector3(-8, 0, -5) },
         { label: 'Ashen Sanctuary', destination: 'floor2', floor: 2, position: new THREE.Vector3(0, 0, -5) },
-        { label: "Dragon's Throne", destination: 'floor3', floor: 3, position: new THREE.Vector3(8, 0, -5) },
+        { label: 'Frostfall Throne', destination: 'floor3', floor: 3, position: new THREE.Vector3(8, 0, -5) },
+        { label: 'Cinder Crown', destination: 'floor4', floor: 4, position: new THREE.Vector3(15, 0, -5) },
       ]
-      : [{ label: 'Eternal Sanctuary', destination: 'hub', floor: null, position: new THREE.Vector3(0, 0, 7) }];
+      : [{ label: 'Eternal Sanctuary', destination: 'hub', floor: null, position: new THREE.Vector3(0, 0, 24) }];
     const activeLandmarks = location === 'floor1' ? this.landmarks : [];
     const anchors = [this.spawn, this.bossSpawn, ...this.portals.map(({ position }) => position),
       ...activeLandmarks.map(({ position }) => position)];
@@ -56,11 +57,13 @@ export class World {
     physics.updateSceneQueries();
     this.spawn.y = this.getSurfaceHeight(this.spawn.x, this.spawn.z);
     this.bossSpawn.y = this.getSurfaceHeight(this.bossSpawn.x, this.bossSpawn.z);
-    this.scene.background = new THREE.Color(location === 'floor2' ? 0x352c2b : location === 'floor3' ? 0x45515b : 0x52616e);
+    this.scene.background = new THREE.Color(
+      location === 'floor2' || location === 'floor4' ? 0x352c2b : location === 'floor3' ? 0x45515b : 0x52616e,
+    );
     this.scene.fog = new THREE.Fog(
-      location === 'floor2' ? 0x4a3834 : location === 'floor3' ? 0x3e4a55 : 0x52616e,
-      location === 'floor2' ? 24 : 42,
-      location === 'floor2' ? 96 : 148,
+      location === 'floor2' || location === 'floor4' ? 0x4a3834 : location === 'floor3' ? 0x3e4a55 : 0x52616e,
+      location === 'floor2' || location === 'floor4' ? 24 : 42,
+      location === 'floor2' || location === 'floor4' ? 96 : 148,
     );
   }
 

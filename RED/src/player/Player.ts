@@ -22,6 +22,7 @@ export class Player {
   health: number;
   stamina: number;
   mana: number;
+  movementMultiplier = 1;
   blocking = false;
   private verticalSpeed = 0;
   private attackPending = false;
@@ -510,11 +511,11 @@ export class Player {
     const wantsSprint = sprinting && (move.y !== 0 || move.x !== 0) && this.dodgeRemaining <= 0;
     const canSprint = wantsSprint && this.stamina > 0;
     const movementConfig = PLAYER_CHARACTER_ASSETS[this.character.race];
-    const speed = this.dodgeRemaining > 0
+    const speed = (this.dodgeRemaining > 0
       ? 10.5
       : canSprint
         ? movementConfig?.runSpeed ?? 7.5
-        : movementConfig?.walkSpeed ?? 4.5;
+        : movementConfig?.walkSpeed ?? 4.5) * this.movementMultiplier;
     if (this.dodgeRemaining > 0) direction.copy(this.dodgeDirection);
     if (this.dodgeRemaining <= 0) {
       if (canSprint) this.stamina = Math.max(0, this.stamina - delta * 16);

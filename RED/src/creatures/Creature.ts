@@ -5,11 +5,12 @@ import type { AssetManager } from '../core/AssetManager';
 import { createCreatureRig, type CreatureRig } from '../actors/CreatureRig';
 import { disposeActorModel } from '../actors/ActorGeometry';
 import { loadCreatureAsset, type GLTFCreatureRig } from './CreatureAssetLoader';
-import type { CreatureAssetConfig } from './CreatureAssetConfig';
+import type { CreatureAssetConfig, DragonBossStyle } from './CreatureAssetConfig';
 
 export interface CreatureBossConfig {
   id: string;
   name: string;
+  style?: DragonBossStyle;
   health: number;
   damage: number;
   range: number;
@@ -17,6 +18,16 @@ export interface CreatureBossConfig {
   modelHeight?: number;
   hoverHeight?: number;
 }
+
+export interface DragonAttack {
+  style: DragonBossStyle;
+  type: 'projectile' | 'breath' | 'ground';
+  origin: THREE.Vector3;
+  target: THREE.Vector3;
+  damage: number;
+}
+
+export type CompanionState = 'Following' | 'Exploring' | 'Alert' | 'Attacking' | 'Recovering' | 'Returning';
 
 export class Creature {
   readonly model = new THREE.Group();
@@ -31,6 +42,7 @@ export class Creature {
   readonly maxHealth: number;
   bossPhase = 1;
   visualAnimationStatus = 'Procedural fallback active';
+  companionState: CompanionState = 'Following';
   defeatReady = false;
   private readonly controller: RAPIER.KinematicCharacterController;
   private readonly origin: THREE.Vector3;
@@ -46,8 +58,16 @@ export class Creature {
   private attackSpecial = false;
   private attackLungeRemaining = 0;
   private readonly attackLungeDirection = new THREE.Vector3();
+  private attackImpactRemaining = 0;
+  private pendingAttackTarget: 'player' | 'companion' | null = null;
+  private pendingAttackStyle: DragonBossStyle | undefined;
+  private companionAttackPending = false;
+  private pendingAttackDamage = 0;
+  private pendingAttackDirection = new THREE.Vector3();
   private deathSequenceRemaining = 0;
   private elapsed = 0;
+  private bossAttackSequence = 0;
+  private activeAttackVariant = 0;
   private knockbackRemaining = 0;
   private readonly knockbackDirection = new THREE.Vector3();
   private readonly healthBar: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
@@ -170,7 +190,14 @@ export class Creature {
   update(
     delta: number,
     playerPosition: THREE.Vector3,
-    callbacks: { damagePlayer: (damage: number) => void },
+    callbacks: {
+      damagePlayer: (damage: number, style?: DragonBossStyle) => void;
+      damageCompanion?: (damage: number) => void;
+      companionPosition?: THREE.Vector3 | null;
+      companionTarget?: THREE.Vector3 | null;
+      companionAttack?: () => void;
+      bossAttack?: (attack: DragonAttack) => void;
+    },
   ): void {
     if (this.mood === 'dead') {
       this.deathSequenceRemaining = Math.max(0, this.deathSequenceRemaining - delta);
@@ -197,6 +224,22 @@ export class Creature {
     this.damageAnimationRemaining = Math.max(0, this.damageAnimationRemaining - delta);
     this.attackAnimationRemaining = Math.max(0, this.attackAnimationRemaining - delta);
     this.attackCooldown = Math.max(0, this.attackCooldown - delta);
+    if (this.attackImpactRemaining > 0) {
+      this.attackImpactRemaining = Math.max(0, this.attackImpactRemaining - delta);
+      if (this.attackImpactRemaining === 0) {
+        if (this.companionAttackPending) {
+          callbacks.companionAttack?.();
+          this.companionAttackPending = false;
+        } else if (this.pendingAttackTarget) {
+          if (this.pendingAttackTarget === 'companion') callbacks.damageCompanion?.(this.pendingAttackDamage);
+          else callbacks.damagePlayer(this.pendingAttackDamage, this.pendingAttackStyle);
+          this.attackLungeRemaining = 0.2;
+          this.attackLungeDirection.copy(this.pendingAttackDirection);
+          this.pendingAttackTarget = null;
+          this.pendingAttackStyle = undefined;
+        }
+      }
+    }
     if (this.attackWindup > 0) {
       this.attackWindup = Math.max(0, this.attackWindup - delta);
       if (this.attackTelegraph) {
@@ -209,17 +252,60 @@ export class Creature {
         const toPlayer = playerPosition.clone().sub(current).setY(0);
         const facing = new THREE.Vector3(Math.sin(this.model.rotation.y), 0, Math.cos(this.model.rotation.y));
         const facingPlayer = toPlayer.lengthSq() > 0.001 && facing.dot(toPlayer.normalize()) >= 0.35;
-        const hitRange = this.bossConfig?.range ?? (this.kind === 'bear' ? 2.5 : 1.8);
-        if (distance <= hitRange && facingPlayer) {
-          const baseDamage = this.bossConfig?.damage ?? (this.kind === 'bear' ? 19 : 9);
-          callbacks.damagePlayer(this.bossPhase === 2 ? Math.round(baseDamage * 1.4) : baseDamage);
-          this.attackLungeRemaining = 0.2;
-          this.attackLungeDirection.copy(toPlayer).normalize();
-          this.attackAnimationRemaining = this.bossConfig ? 0.52 : this.kind === 'bear' ? 0.86 : 0.68;
-          this.attackSpecial = this.bossPhase === 2;
-          this.attackCooldown = this.bossConfig ? (this.bossPhase === 2 ? 1.35 : 2.05) : this.kind === 'bear' ? 1.9 : 1.35;
+        const style = this.bossConfig?.style;
+        const closeRange = style === 'hydra' ? 5 : 3.6;
+        const hitRange = style ? closeRange : this.bossConfig?.range ?? (this.kind === 'bear' ? 2.5 : 1.8);
+        const attackTypes: Record<DragonBossStyle, DragonAttack['type'][]> = {
+          eastern: ['projectile', 'breath', 'ground'],
+          hydra: ['breath', 'ground', 'breath'],
+          ice: ['projectile', 'ground', 'breath'],
+          fire: ['projectile', 'breath', 'ground'],
+        };
+        this.activeAttackVariant = style ? this.bossAttackSequence++ : 0;
+        const attackType = style
+          ? attackTypes[style][this.activeAttackVariant % attackTypes[style].length]
+          : null;
+        const rangedAttack = style && distance > closeRange && attackType !== null;
+        if (rangedAttack) {
+          const direction = playerPosition.clone().sub(current).setY(0).normalize();
+          const origin = current.clone().add(new THREE.Vector3(0, this.height * 0.62, 0))
+            .addScaledVector(direction, Math.min(1.6, this.height * 0.2));
+          callbacks.bossAttack?.({
+            style,
+            type: attackType,
+            origin,
+            target: playerPosition.clone().add(new THREE.Vector3(0, 0.9, 0)),
+            damage: this.bossConfig!.damage * (this.bossPhase === 2 ? 1.35 : 1),
+          });
+          this.attackAnimationRemaining = 1.25;
+          this.attackSpecial = true;
+          this.attackCooldown = this.bossPhase === 2 ? 1.45 : 2.2;
         } else {
-          this.attackCooldown = 0.35;
+          const companionPosition = callbacks.companionPosition;
+          const companionDistance = companionPosition?.distanceTo(current) ?? Number.POSITIVE_INFINITY;
+          const toCompanion = companionPosition?.clone().sub(current).setY(0);
+          const facingCompanion = Boolean(
+            toCompanion
+            && toCompanion.lengthSq() > 0.001
+            && facing.dot(toCompanion.normalize()) >= 0.35
+            && companionDistance <= hitRange,
+          );
+          const hitsPlayer = distance <= hitRange && facingPlayer;
+          if (hitsPlayer || facingCompanion) {
+            const baseDamage = this.bossConfig?.damage ?? (this.kind === 'bear' ? 19 : 9);
+            const damage = this.bossPhase === 2 ? Math.round(baseDamage * 1.4) : baseDamage;
+            const targetsCompanion = facingCompanion && (!hitsPlayer || companionDistance < distance);
+            this.pendingAttackTarget = targetsCompanion ? 'companion' : 'player';
+            this.pendingAttackStyle = style;
+            this.pendingAttackDamage = damage;
+            this.pendingAttackDirection.copy(targetsCompanion && toCompanion ? toCompanion : toPlayer).normalize();
+            this.attackImpactRemaining = this.bossConfig ? 0.42 : this.kind === 'bear' ? 0.34 : 0.24;
+            this.attackAnimationRemaining = this.bossConfig ? 1.25 : this.kind === 'bear' ? 0.86 : 0.68;
+            this.attackSpecial = this.bossPhase === 2;
+            this.attackCooldown = this.bossConfig ? (this.bossPhase === 2 ? 1.35 : 2.05) : this.kind === 'bear' ? 1.9 : 1.35;
+          } else {
+            this.attackCooldown = 0.35;
+          }
         }
         if (this.attackTelegraph) this.attackTelegraph.visible = false;
       }
@@ -229,17 +315,43 @@ export class Creature {
     let attackStarted = false;
     let specialAttack = false;
     if (this.mood === 'tamed') {
-      if (distance > 3.2) {
+      if (callbacks.companionTarget) {
+        const targetDistance = current.distanceTo(callbacks.companionTarget);
+        if (targetDistance > 1.65) {
+          target = callbacks.companionTarget;
+          speed = 4.5;
+        } else {
+          target = callbacks.companionTarget;
+          if (this.attackCooldown === 0 && this.attackWindup === 0) {
+            this.attackAnimationRemaining = 0.72;
+            this.attackSpecial = true;
+            this.attackImpactRemaining = 0.24;
+            this.companionAttackPending = true;
+            this.attackCooldown = 1.25;
+          }
+        }
+      } else if (distance > 3.2) {
         target = playerPosition;
         speed = 4;
       }
     } else if (this.bossConfig) {
-      if (distance < 28) {
+      if (distance < 42) {
         if (this.attackWindup > 0) {
           target = playerPosition;
+        } else if (this.bossConfig.style === 'eastern' && distance <= this.bossConfig.range) {
+          const orbit = this.elapsed * (this.bossPhase === 2 ? 1.1 : 0.72);
+          target = new THREE.Vector3(
+            playerPosition.x + Math.cos(orbit) * 6.2,
+            current.y,
+            playerPosition.z + Math.sin(orbit) * 6.2,
+          );
+          speed = this.bossPhase === 2 ? 5.2 : 4.4;
+        } else if (this.bossConfig.style === 'ice' && distance < 7.5) {
+          target = current.clone().sub(playerPosition).setY(0).normalize().add(current);
+          speed = 3.8;
         } else if (distance > this.bossConfig.range) {
           target = playerPosition;
-          speed = this.bossPhase === 2 ? 5.6 : 4.1;
+          speed = this.bossPhase === 2 ? 6.2 : this.bossConfig.style === 'hydra' ? 3.1 : 4.4;
         } else if (this.attackCooldown === 0 && this.attackWindup === 0) {
           this.attackWindupDuration = this.bossPhase === 2 ? 0.82 : 1.12;
           this.attackWindup = this.attackWindupDuration;
@@ -326,8 +438,13 @@ export class Creature {
       z: nextZ,
     });
     this.model.position.set(nextX, Math.max(groundHeight, position.y + movement.y - this.groundOffset), nextZ);
-    const hoverHeight = this.bossConfig?.hoverHeight ?? 0;
-    this.visualRig.model.position.y = hoverHeight + Math.sin(this.elapsed * 2.2) * (hoverHeight > 0 ? 0.08 : 0);
+    const flightCycle = this.elapsed % 13;
+    const flightPhase = flightCycle > 9 && this.bossConfig?.style !== 'hydra';
+    const flying = Boolean(this.bossConfig?.style && this.bossConfig.style !== 'hydra' && flightPhase && movementSpeed > 0);
+    if (flying) movementSpeed = Math.max(movementSpeed, 5);
+    const hoverHeight = flying ? 2.25 : this.bossConfig?.hoverHeight ?? 0;
+    this.visualRig.model.position.y = hoverHeight
+      + Math.sin(this.elapsed * (flying ? 4 : 2.2)) * (hoverHeight > 0 ? 0.12 : 0);
     this.visualRig.update(
       delta,
       movementSpeed > 0 ? 1 : 0,
@@ -337,6 +454,8 @@ export class Creature {
       false,
       this.attackSpecial && this.attackAnimationRemaining > 0,
       Boolean(this.bossConfig && this.attackWindup > 0),
+      this.activeAttackVariant,
+      flying,
     );
     if (this.attackAnimationRemaining === 0) this.attackSpecial = false;
     this.damagePending = false;
@@ -347,7 +466,7 @@ export class Creature {
   }
 
   takeDamage(amount: number, knockbackDirection?: THREE.Vector3): void {
-    if (this.mood === 'dead' || this.mood === 'tamed') return;
+    if (this.mood === 'dead') return;
     this.health = Math.max(0, this.health - amount);
     if (this.bossConfig) this.bossPhase = this.health <= this.maxHealth * 0.5 ? 2 : 1;
     this.damagePending = true;
@@ -358,6 +477,10 @@ export class Creature {
     }
     if (this.health === 0) {
       this.mood = 'dead';
+      this.attackImpactRemaining = 0;
+      this.pendingAttackTarget = null;
+      this.pendingAttackStyle = undefined;
+      this.companionAttackPending = false;
       this.deathSequenceRemaining = this.bossConfig ? 1.25 : 0;
       this.defeatReady = this.deathSequenceRemaining === 0;
       this.collider.setEnabled(false);
@@ -370,6 +493,22 @@ export class Creature {
   tame(): void {
     this.mood = 'tamed';
     this.health = Math.max(this.health, 1);
+  }
+
+  reviveCompanion(position: THREE.Vector3): void {
+    if (this.mood !== 'dead' || this.kind !== 'wolf') return;
+    this.mood = 'tamed';
+    this.health = Math.max(1, Math.ceil(this.maxHealth * 0.45));
+    this.deathSequenceRemaining = 0;
+    this.defeatReady = false;
+    this.collider.setEnabled(true);
+    this.body.setTranslation({
+      x: position.x,
+      y: this.groundHeightAt(position.x, position.z),
+      z: position.z,
+    }, true);
+    this.model.position.set(position.x, this.surfaceHeightAt(position.x, position.z), position.z);
+    this.visualRig.model.position.set(0, 0, 0);
   }
 
   dispose(): void {

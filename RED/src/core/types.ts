@@ -1,7 +1,7 @@
 export type Race = 'Human' | 'Elf' | 'Dwarf' | 'Beastkin';
 export type CreatureKind = 'wolf' | 'deer' | 'bear';
 export type CreatureMood = 'hostile' | 'passive' | 'territorial' | 'tamed' | 'dead';
-export type GameLocation = 'hub' | 'floor1' | 'floor2' | 'floor3';
+export type GameLocation = 'hub' | 'floor1' | 'floor2' | 'floor3' | 'floor4';
 
 export interface TowerProgression {
   currentLocation: GameLocation;
@@ -45,18 +45,31 @@ export function normalizeTowerProgression(value: unknown, fallback: GameLocation
   const saved = value as Partial<TowerProgression>;
   const unlockedFloors = Array.isArray(saved.unlockedFloors)
     ? [...new Set(saved.unlockedFloors.filter((floor): floor is number =>
-      Number.isInteger(floor) && floor >= 1 && floor <= 3,
+      Number.isInteger(floor) && floor >= 1 && floor <= 4,
     ))].sort((a, b) => a - b)
     : [1];
   if (!unlockedFloors.includes(1)) unlockedFloors.unshift(1);
   const defeatedBosses = Array.isArray(saved.defeatedBosses)
     ? [...new Set(saved.defeatedBosses.filter((boss): boss is string => typeof boss === 'string'))]
     : [];
+  const legacyBosses: Array<[string, string, number, number]> = [
+    ['ancient-wolf', 'eastern-dragon', 1, 2],
+    ['eternal-phoenix', 'three-headed-hydra', 2, 3],
+    ['eternal-dragon', 'ice-dragon', 3, 4],
+  ];
+  for (const [legacyId, currentId, defeatedFloor, nextFloor] of legacyBosses) {
+    if (!defeatedBosses.includes(legacyId)) continue;
+    if (!defeatedBosses.includes(currentId)) defeatedBosses.push(currentId);
+    if (unlockedFloors.includes(defeatedFloor) && !unlockedFloors.includes(nextFloor)) {
+      unlockedFloors.push(nextFloor);
+    }
+  }
   const requestedLocation = saved.currentLocation;
   const currentLocation: GameLocation = requestedLocation === 'hub'
     || requestedLocation === 'floor1'
     || requestedLocation === 'floor2'
     || requestedLocation === 'floor3'
+    || requestedLocation === 'floor4'
       ? requestedLocation
       : fallback;
   const floor = Number(currentLocation.slice(-1));

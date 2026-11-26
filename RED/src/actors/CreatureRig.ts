@@ -13,6 +13,8 @@ export interface CreatureRig {
     dead: boolean,
     special: boolean,
     telegraph?: boolean,
+    attackVariant?: number,
+    flying?: boolean,
   ): void;
   dispose?(): void;
 }

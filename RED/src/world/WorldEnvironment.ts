@@ -93,6 +93,8 @@ export class WorldEnvironment {
   private readonly materials = new Set<THREE.Material>();
   private readonly textures = new Set<THREE.Texture>();
   private readonly windUniforms: Array<{ value: number }> = [];
+  private readonly waterTimeUniforms: Array<{ value: number }> = [];
+  private readonly natureModels: THREE.Object3D[] = [];
   private readonly curvePoints = new Map<THREE.CatmullRomCurve3, THREE.Vector3[]>();
   private readonly riverCurve: THREE.CatmullRomCurve3;
   private readonly paths: PathDefinition[];
@@ -122,7 +124,7 @@ export class WorldEnvironment {
     private readonly anchors: THREE.Vector3[],
     private readonly location: GameLocation,
   ) {
-    if (location === 'floor2') {
+    if (location === 'floor2' || location === 'floor4') {
       this.overcastSky.setHex(0x96796e);
       this.clearSky.setHex(0xc98d68);
       this.overcastHaze.setHex(0x493634);
@@ -188,11 +190,12 @@ export class WorldEnvironment {
       this.addReturnPortal();
     } else if (location === 'hub') {
       this.buildSanctuary();
-    } else if (location === 'floor2') {
+    } else if (location === 'floor2' || location === 'floor4') {
       this.buildAshenSanctuary();
     } else {
       this.buildDragonThrone();
     }
+    if (location !== 'hub') void this.buildNatureKit();
     this.buildLighting();
     this.buildParticles();
     for (const anchor of this.anchors) anchor.y = this.getSurfaceHeight(anchor.x, anchor.z);
@@ -227,6 +230,7 @@ export class WorldEnvironment {
   update(delta: number): void {
     this.elapsed += delta;
     for (const uniform of this.windUniforms) uniform.value = this.elapsed;
+    for (const uniform of this.waterTimeUniforms) uniform.value = this.elapsed;
     this.cloudTexture.offset.x = (this.elapsed * 0.00055) % 1;
 
     const positions = this.particles.geometry.getAttribute('position');
@@ -234,7 +238,7 @@ export class WorldEnvironment {
       let x = positions.getX(i) + Math.sin(this.elapsed * 0.27 + i) * delta * 0.2;
       let y = positions.getY(i);
       let z = positions.getZ(i) + Math.cos(this.elapsed * 0.21 + i * 0.7) * delta * 0.17;
-      if (this.location === 'floor2') {
+      if (this.location === 'floor2' || this.location === 'floor4') {
         y += delta * (0.12 + (i % 5) * 0.045);
         if (y > this.getSurfaceHeight(x, z) + 10) {
           y = this.getSurfaceHeight(x, z) + 0.3 + (i % 6) * 0.45;
@@ -275,8 +279,8 @@ export class WorldEnvironment {
     this.hemisphere.color.copy(this.overcastSky).lerp(this.clearSky, daylight * 0.08);
     if (this.scene.fog instanceof THREE.Fog) {
       this.scene.fog.color.copy(this.overcastHaze).lerp(this.clearHaze, daylight * 0.28);
-      const fogNear = this.location === 'floor2' ? 24 : this.location === 'floor3' ? 42 : 38;
-      const fogFar = this.location === 'floor2' ? 96 : this.location === 'floor3' ? 148 : 132;
+      const fogNear = this.location === 'floor2' || this.location === 'floor4' ? 24 : this.location === 'floor3' ? 42 : 38;
+      const fogFar = this.location === 'floor2' || this.location === 'floor4' ? 96 : this.location === 'floor3' ? 148 : 132;
       this.scene.fog.near = fogNear + daylight * 5;
       this.scene.fog.far = fogFar + daylight * 16;
     }
@@ -317,7 +321,7 @@ export class WorldEnvironment {
     const uvs = new Float32Array(side * side * 2);
     const heights = new Float32Array(side * side);
     const indices = new Uint32Array(TERRAIN_SEGMENTS * TERRAIN_SEGMENTS * 6);
-    const palette = this.location === 'floor2'
+    const palette = this.location === 'floor2' || this.location === 'floor4'
       ? [0x514b49, 0x66544a, 0x555353, 0x8a7770]
       : this.location === 'floor3'
         ? [0x69716f, 0x776d62, 0x737a7b, 0xc1c9ca]
@@ -393,7 +397,7 @@ export class WorldEnvironment {
           Math.sin(x * 0.09 + Math.cos(z * 0.07)) * 0.025
           + Math.cos(z * 0.13 - x * 0.055) * 0.018
         );
-        const highlandBlend = highlandCover * (this.location === 'floor2' ? 0.54 : 0.82);
+        const highlandBlend = highlandCover * (this.location === 'floor2' || this.location === 'floor4' ? 0.54 : 0.82);
         blendedColor.lerp(highlandColor, Math.max(highlandBlend, lowlandSnow));
         blendedColor.multiplyScalar(1 + groundVariation);
         colors[vertex * 3] = blendedColor.r;
@@ -432,7 +436,7 @@ export class WorldEnvironment {
       roughness: 1,
       metalness: 0,
     });
-    if (this.location === 'floor2') {
+    if (this.location === 'floor2' || this.location === 'floor4') {
       material.emissive.setHex(0xff5124);
       material.emissiveMap = this.createLavaFissureTexture();
       material.emissiveIntensity = 0.85;
@@ -481,7 +485,7 @@ export class WorldEnvironment {
   private createGroundTexture(): THREE.DataTexture {
     const size = 256;
     const pixels = new Uint8Array(size * size * 4);
-    const [baseRed, baseGreen, baseBlue] = this.location === 'floor2'
+    const [baseRed, baseGreen, baseBlue] = this.location === 'floor2' || this.location === 'floor4'
       ? [106, 96, 91]
       : this.location === 'floor3'
         ? [122, 135, 145]
@@ -629,16 +633,32 @@ export class WorldEnvironment {
   private buildRiver(): void {
     const bankCurve = this.curveFollowingGround(this.riverCurve, 0.015);
     const waterCurve = this.curveFollowingGround(this.riverCurve, 0.34);
+    const time = { value: 0 };
+    const waterMaterial = new THREE.MeshStandardMaterial({
+      color: 0x82a9a4,
+      roughness: 0.24,
+      metalness: 0.08,
+      transparent: true,
+      opacity: 0.82,
+      depthWrite: false,
+    });
+    waterMaterial.onBeforeCompile = (shader) => {
+      shader.uniforms.uRiverTime = time;
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nuniform float uRiverTime;')
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          transformed.y += sin(position.x * 0.82 + position.z * 0.57 + uRiverTime * 1.3) * 0.035
+            + cos(position.z * 1.17 - uRiverTime * 0.9) * 0.018;`,
+        );
+    };
+    waterMaterial.customProgramCacheKey = () => 'red-valley-river-ripple-v1';
+    this.materials.add(waterMaterial);
+    this.waterTimeUniforms.push(time);
     const water = new THREE.Mesh(
       new THREE.TubeGeometry(waterCurve, 160, 1.34, 10, false),
-      new THREE.MeshStandardMaterial({
-        color: 0x9ac4b4,
-        roughness: 0.2,
-        metalness: 0.12,
-        transparent: true,
-        opacity: 0.84,
-        depthWrite: false,
-      }),
+      waterMaterial,
     );
     water.castShadow = false;
     water.receiveShadow = true;
@@ -655,6 +675,32 @@ export class WorldEnvironment {
     bank.receiveShadow = true;
     this.trackObject(bank);
     this.scene.add(bank);
+
+    const foamMaterial = new THREE.MeshBasicMaterial({
+      color: 0xb6d5ca,
+      transparent: true,
+      opacity: 0.32,
+      depthWrite: false,
+    });
+    this.materials.add(foamMaterial);
+    const riverPoints = this.riverCurve.getPoints(80);
+    for (const side of [-1, 1]) {
+      const foamPoints = riverPoints.map((point, index) => {
+        const tangent = this.riverCurve.getTangentAt(index / (riverPoints.length - 1)).setY(0).normalize();
+        const offset = 1.16 + Math.sin(index * 1.9) * 0.12;
+        const x = point.x - tangent.z * offset * side;
+        const z = point.z + tangent.x * offset * side;
+        return new THREE.Vector3(x, this.getSurfaceHeight(x, z) + 0.31, z);
+      });
+      const foam = new THREE.Mesh(
+        new THREE.TubeGeometry(new THREE.CatmullRomCurve3(foamPoints), 180, 0.035, 5, false),
+        foamMaterial,
+      );
+      foam.castShadow = false;
+      foam.renderOrder = 2;
+      this.trackObject(foam);
+      this.scene.add(foam);
+    }
 
     const shorelineMat = new THREE.MeshStandardMaterial({ color: 0x667454, roughness: 1 });
     this.materials.add(shorelineMat);
@@ -738,7 +784,7 @@ export class WorldEnvironment {
     });
 
     const skyGeometry = new THREE.SphereGeometry(280, 24, 16);
-    const [horizonHex, zenithHex] = this.location === 'floor2'
+    const [horizonHex, zenithHex] = this.location === 'floor2' || this.location === 'floor4'
       ? [0x896657, 0x392c2d]
       : this.location === 'floor3'
         ? [0x8faabb, 0x2d3d4b]
@@ -768,10 +814,10 @@ export class WorldEnvironment {
 
     this.cloudTexture = this.createCloudTexture();
     const cloudMaterial = new THREE.MeshBasicMaterial({
-      color: this.location === 'floor2' ? 0x806057 : this.location === 'floor3' ? 0x8193a0 : 0xadb8be,
+      color: this.location === 'floor2' || this.location === 'floor4' ? 0x806057 : this.location === 'floor3' ? 0x8193a0 : 0xadb8be,
       map: this.cloudTexture,
       transparent: true,
-      opacity: this.location === 'floor2' ? 0.34 : 0.48,
+      opacity: this.location === 'floor2' || this.location === 'floor4' ? 0.34 : 0.48,
       depthWrite: false,
       side: THREE.BackSide,
       fog: false,
@@ -812,10 +858,10 @@ export class WorldEnvironment {
     const positions = geometry.getAttribute('position');
     const colors = new Float32Array(positions.count * 3);
     const rock = new THREE.Color(
-      this.location === 'floor2' ? 0x3c3030 : this.location === 'floor3' ? 0x4e5e6a : 0x58636b,
+      this.location === 'floor2' || this.location === 'floor4' ? 0x3c3030 : this.location === 'floor3' ? 0x4e5e6a : 0x58636b,
     );
     const highland = new THREE.Color(
-      this.location === 'floor2' ? 0x786357 : this.location === 'floor3' ? 0xb9c9d1 : 0xc8d1d2,
+      this.location === 'floor2' || this.location === 'floor4' ? 0x786357 : this.location === 'floor3' ? 0xb9c9d1 : 0xc8d1d2,
     );
     const surface = new THREE.Color();
 
@@ -1167,6 +1213,141 @@ export class WorldEnvironment {
       log.receiveShadow = true;
       this.scene.add(log);
     }
+  }
+
+  private async buildNatureKit(): Promise<void> {
+    const definitions = [
+      { name: 'Pine_1', count: this.location === 'floor1' ? 18 : 8, height: 6.2, tint: 0.72, shadows: true },
+      { name: 'Bush_Common', count: this.location === 'floor1' ? 14 : 6, height: 1.15, tint: 0.64, shadows: false },
+      { name: 'Fern_1', count: this.location === 'floor1' ? 11 : 4, height: 0.9, tint: 0.68, shadows: false },
+      { name: 'Grass_Common_Tall', count: this.location === 'floor1' ? 34 : 14, height: 0.72, tint: 0.62, shadows: false },
+      { name: 'Rock_Medium_1', count: this.location === 'floor1' ? 12 : 7, height: 1.25, tint: 0.7, shadows: true },
+      { name: 'Pebble_Round_1', count: this.location === 'floor1' ? 22 : 10, height: 0.4, tint: 0.76, shadows: false },
+    ] as const;
+    const random = randomGenerator(this.location === 'floor1' ? 48291 : this.location === 'floor2' ? 48292 : this.location === 'floor3' ? 48293 : 48294);
+    for (const definition of definitions) {
+      if (this.disposed) return;
+      const path = `assets/environment/nature-megakit/glTF/${definition.name}.gltf`;
+      try {
+        const response = await fetch(this.assets.resolveAssetUrl(path), { method: 'HEAD' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const loaded = await this.assets.loadModel(path, () => new THREE.Group());
+        if (this.disposed) {
+          this.assets.releaseModel(loaded.scene);
+          return;
+        }
+        let renderable = false;
+        loaded.scene.traverse((object) => {
+          if (object instanceof THREE.Mesh) renderable = true;
+        });
+        if (!renderable) {
+          this.assets.releaseModel(loaded.scene);
+          throw new Error('The glTF contains no renderable meshes.');
+        }
+        this.natureModels.push(loaded.scene);
+        this.addNatureInstances(loaded.scene, definition, random);
+      } catch (error) {
+        console.error(`Could not load Nature MegaKit model "${path}".`, error);
+      }
+    }
+  }
+
+  private addNatureInstances(
+    source: THREE.Object3D,
+    definition: {
+      name: string;
+      count: number;
+      height: number;
+      tint: number;
+      shadows: boolean;
+    },
+    random: () => number,
+  ): void {
+    source.updateMatrixWorld(true);
+    const bounds = new THREE.Box3().setFromObject(source);
+    const sourceHeight = bounds.getSize(new THREE.Vector3()).y;
+    if (!Number.isFinite(sourceHeight) || sourceHeight <= 0) {
+      throw new Error(`Nature model "${definition.name}" has invalid vertical bounds.`);
+    }
+    const center = bounds.getCenter(new THREE.Vector3());
+    const inverseRoot = source.matrixWorld.clone().invert();
+    const instances: InstanceSpec[] = [];
+    if (definition.name === 'Rock_Medium_1' && this.location === 'floor1') {
+      for (let index = 0; index < 8; index++) {
+        const progress = 0.12 + index * 0.105;
+        const riverPoint = this.riverCurve.getPointAt(progress);
+        const tangent = this.riverCurve.getTangentAt(progress).setY(0).normalize();
+        const side = index % 2 === 0 ? 1 : -1;
+        const offset = 2.85 + random() * 0.52;
+        const x = riverPoint.x - tangent.z * offset * side;
+        const z = riverPoint.z + tangent.x * offset * side;
+        instances.push({
+          position: new THREE.Vector3(x, this.getSurfaceHeight(x, z), z),
+          rotation: new THREE.Euler((random() - 0.5) * 0.18, random() * Math.PI * 2, (random() - 0.5) * 0.18),
+          scale: new THREE.Vector3().setScalar((definition.height / sourceHeight) * (0.72 + random() * 0.62)),
+        });
+      }
+    }
+    const attempts = definition.count * 18;
+    for (let attempt = 0; instances.length < definition.count && attempt < attempts; attempt++) {
+      const angle = random() * Math.PI * 2;
+      const radius = 18 + random() * 29;
+      const x = Math.cos(angle) * radius + (random() - 0.5) * 7;
+      const z = Math.sin(angle) * radius + (random() - 0.5) * 7;
+      if (this.location === 'floor1' && !this.isVegetationLocation(x, z, definition.height * 0.3)) continue;
+      if (this.location !== 'floor1' && Math.hypot(x, z + 27) < 14) continue;
+      if (definition.name === 'Rock_Medium_1' && this.location === 'floor1' && this.distanceToCurve(x, z, this.riverCurve, 36) < 4.1) continue;
+      const ground = this.getSurfaceHeight(x, z);
+      const scaleFactor = 0.74 + random() * 0.62;
+      instances.push({
+        position: new THREE.Vector3(x, ground, z),
+        rotation: new THREE.Euler(
+          definition.name === 'Pine_1' ? 0 : (random() - 0.5) * 0.18,
+          random() * Math.PI * 2,
+          definition.name === 'Pine_1' ? 0 : (random() - 0.5) * 0.18,
+        ),
+        scale: new THREE.Vector3().setScalar((definition.height / sourceHeight) * scaleFactor),
+      });
+    }
+    if (instances.length === 0) return;
+
+    source.traverse((object) => {
+      if (!(object instanceof THREE.Mesh) || object instanceof THREE.SkinnedMesh) return;
+      const geometry = object.geometry.clone();
+      const relativeTransform = inverseRoot.clone().multiply(object.matrixWorld);
+      geometry.applyMatrix4(relativeTransform);
+      geometry.translate(-center.x, -bounds.min.y, -center.z);
+      this.geometries.add(geometry);
+      const sourceMaterials = Array.isArray(object.material) ? object.material : [object.material];
+      const materials = sourceMaterials.map((material) => {
+        const adjusted = material.clone();
+        if (adjusted instanceof THREE.MeshStandardMaterial) {
+          adjusted.color.multiplyScalar(definition.tint);
+          adjusted.roughness = Math.max(adjusted.roughness, 0.82);
+          adjusted.metalness = 0;
+          if (definition.name === 'Grass_Common_Tall') adjusted.side = THREE.DoubleSide;
+        }
+        this.materials.add(adjusted);
+        return adjusted;
+      });
+      const mesh = new THREE.InstancedMesh(
+        geometry,
+        Array.isArray(object.material) ? materials : materials[0],
+        instances.length,
+      );
+      const matrix = new THREE.Matrix4();
+      const quaternion = new THREE.Quaternion();
+      instances.forEach((instance, index) => {
+        quaternion.setFromEuler(instance.rotation);
+        matrix.compose(instance.position, quaternion, instance.scale);
+        mesh.setMatrixAt(index, matrix);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.computeBoundingSphere();
+      mesh.castShadow = definition.shadows;
+      mesh.receiveShadow = definition.shadows;
+      this.scene.add(mesh);
+    });
   }
 
   private isVegetationLocation(x: number, z: number, margin: number): boolean {
@@ -1736,7 +1917,7 @@ export class WorldEnvironment {
 
   private addReturnPortal(): void {
     const x = 0;
-    const z = 7;
+    const z = 24;
     const ground = this.getSurfaceHeight(x, z);
     const portal = this.addArchitectureMesh(
       new THREE.TorusGeometry(1.25, 0.09, 10, 40),
@@ -1782,15 +1963,15 @@ export class WorldEnvironment {
   }
 
   private buildLighting(): void {
-    const skyColor = this.location === 'floor2' ? 0x9c7566 : this.location === 'floor3' ? 0xa2b4c0 : 0xc8dcf5;
-    const groundColor = this.location === 'floor2' ? 0x302a29 : this.location === 'floor3' ? 0x3e454b : 0x493a36;
+    const skyColor = this.location === 'floor2' || this.location === 'floor4' ? 0x9c7566 : this.location === 'floor3' ? 0xa2b4c0 : 0xc8dcf5;
+    const groundColor = this.location === 'floor2' || this.location === 'floor4' ? 0x302a29 : this.location === 'floor3' ? 0x3e454b : 0x493a36;
     this.hemisphere = new THREE.HemisphereLight(
       skyColor,
       groundColor,
       this.graphics.hemisphereLightIntensity,
     );
     this.scene.add(this.hemisphere);
-    const sunlight = this.location === 'floor2' ? 0xff8a4b : this.location === 'floor3' ? 0xc5d8e6 : 0xffd5a1;
+    const sunlight = this.location === 'floor2' || this.location === 'floor4' ? 0xff8a4b : this.location === 'floor3' ? 0xc5d8e6 : 0xffd5a1;
     this.sun = new THREE.DirectionalLight(sunlight, this.graphics.directionalLightIntensity);
     this.sun.position.set(-28, 52, 25);
     this.sun.castShadow = this.graphics.shadows;
@@ -1821,16 +2002,16 @@ export class WorldEnvironment {
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     this.geometries.add(geometry);
     const material = new THREE.PointsMaterial({
-      color: this.location === 'floor2'
+      color: this.location === 'floor2' || this.location === 'floor4'
         ? 0xff8750
         : this.location === 'floor3'
           ? 0xd8e4ed
           : this.location === 'hub'
             ? 0xe6d7a7
             : 0xdce9f1,
-      size: this.location === 'floor2' ? 0.08 : this.location === 'hub' ? 0.07 : 0.12,
+      size: this.location === 'floor2' || this.location === 'floor4' ? 0.08 : this.location === 'hub' ? 0.07 : 0.12,
       transparent: true,
-      opacity: this.location === 'floor2' ? 0.58 : this.location === 'hub' ? 0.24 : 0.42,
+      opacity: this.location === 'floor2' || this.location === 'floor4' ? 0.58 : this.location === 'hub' ? 0.24 : 0.42,
       sizeAttenuation: true,
       depthWrite: false,
     });
@@ -1906,6 +2087,8 @@ export class WorldEnvironment {
   dispose(): void {
     this.disposed = true;
     this.audio.dispose();
+    for (const model of this.natureModels) this.assets.releaseModel(model);
+    this.natureModels.length = 0;
     for (const body of this.colliders) this.physics.removeRigidBody(body);
     for (const geometry of this.geometries) geometry.dispose();
     for (const material of this.materials) material.dispose();
@@ -1919,6 +2102,7 @@ export class WorldEnvironment {
     this.textures.clear();
     this.curvePoints.clear();
     this.windUniforms.length = 0;
+    this.waterTimeUniforms.length = 0;
     this.brazierLights.length = 0;
   }
 }

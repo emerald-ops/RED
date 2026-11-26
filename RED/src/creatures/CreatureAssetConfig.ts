@@ -7,7 +7,8 @@ export interface CreatureAssetConfig {
   animationMap?: Partial<Record<CreatureAnimationState, string>>;
 }
 
-export type CreatureAnimationState = 'idle' | 'walk' | 'run' | 'sit' | 'attack' | 'special' | 'telegraph' | 'hit' | 'death';
+export type CreatureAnimationState = 'idle' | 'walk' | 'run' | 'fly' | 'sit' | 'attack' | 'special' | 'telegraph' | 'hit' | 'death';
+export type DragonBossStyle = 'eastern' | 'hydra' | 'ice' | 'fire';
 
 export const TYRANNOSAURUS_TEST_ASSET: CreatureAssetConfig = {
   id: 'tyrannosaurus-test',
@@ -17,25 +18,150 @@ export const TYRANNOSAURUS_TEST_ASSET: CreatureAssetConfig = {
   animationMap: { idle: 'ArmatureAction' },
 };
 
-export const MONSTER_PREVIEW_ASSETS: readonly CreatureAssetConfig[] = [
+export const DIREWOLF_COMPANION_ASSET: CreatureAssetConfig = {
+  id: 'direwolf-companion',
+  label: 'Direwolf Companion',
+  path: 'assets/monsters/bosses/ancient-wolf/rigged-wolf.glb',
+  targetHeight: 1.4,
+  animationMap: {
+    idle: 'Wolf_Idle_',
+    walk: 'Wolf_Walk_cycle_',
+    run: 'Wolf_Run_Cycle_',
+    sit: 'Wolf_seat_',
+    attack: 'Wolf_Run_Cycle_',
+    special: 'Wolf_Run_Cycle_',
+    telegraph: 'Wolf_creep_cycle',
+  },
+};
+
+export interface DragonBossDefinition {
+  floor: number;
+  id: string;
+  name: string;
+  style: DragonBossStyle;
+  health: number;
+  damage: number;
+  range: number;
+  size: number;
+  modelHeight: number;
+  asset: CreatureAssetConfig;
+}
+
+export const DRAGON_BOSSES: readonly DragonBossDefinition[] = [
   {
-    id: 'ancient-wolf-rigged',
-    label: 'Floor 1 - Ancient Wolf (Rigged Wolf)',
-    path: 'assets/monsters/bosses/ancient-wolf/rigged-wolf.glb',
-    targetHeight: 2.45,
-    animationMap: {
-      idle: 'Wolf_Idle_',
-      walk: 'Wolf_Walk_cycle_',
-      run: 'Wolf_Run_Cycle_',
-      sit: 'Wolf_seat_',
+    floor: 1,
+    id: 'eastern-dragon',
+    name: 'Jade Eastern Dragon',
+    style: 'eastern',
+    health: 480,
+    damage: 23,
+    range: 8,
+    size: 2.1,
+    modelHeight: 5.4,
+    asset: {
+      id: 'eastern-dragon',
+      label: 'Eastern Dragon',
+      path: 'assets/monsters/bosses/dragons/eastern-dragon.glb',
+      targetHeight: 5.4,
+      animationMap: {
+        idle: 'Idle',
+        walk: 'Walk',
+        run: 'Walk',
+        fly: 'Fly',
+        attack: 'Attack',
+        special: 'Attack',
+        telegraph: 'Roar',
+      },
     },
   },
+  {
+    floor: 2,
+    id: 'three-headed-hydra',
+    name: 'Three-Headed Hydra',
+    style: 'hydra',
+    health: 760,
+    damage: 30,
+    range: 9,
+    size: 2.5,
+    modelHeight: 7.6,
+    asset: {
+      id: 'three-headed-hydra',
+      label: 'Three-Headed Hydra',
+      path: 'assets/monsters/bosses/dragons/three-headed-hydra.glb',
+      targetHeight: 7.6,
+      animationMap: {
+        idle: 'Idle',
+        walk: 'Walk',
+        run: 'Walk',
+        attack: 'Attack',
+        special: 'Attack',
+        telegraph: 'Roar',
+      },
+    },
+  },
+  {
+    floor: 3,
+    id: 'ice-dragon',
+    name: 'Frostbound Dragon',
+    style: 'ice',
+    health: 920,
+    damage: 32,
+    range: 11,
+    size: 2.2,
+    modelHeight: 6.1,
+    asset: {
+      id: 'ice-dragon',
+      label: 'Ice Dragon',
+      path: 'assets/monsters/bosses/dragons/ice-dragon.glb',
+      targetHeight: 6.1,
+      animationMap: {
+        idle: 'Idle',
+        walk: 'Walk',
+        run: 'Walk',
+        fly: 'Fly',
+        attack: 'Attack',
+        special: 'Attack',
+        telegraph: 'Roar',
+      },
+    },
+  },
+  {
+    floor: 4,
+    id: 'fire-dragon',
+    name: 'Emberheart Dragon',
+    style: 'fire',
+    health: 1120,
+    damage: 36,
+    range: 12,
+    size: 2.3,
+    modelHeight: 6.2,
+    asset: {
+      id: 'fire-dragon',
+      label: 'Fire Dragon',
+      path: 'assets/monsters/bosses/dragons/fire-dragon.glb',
+      targetHeight: 6.2,
+      animationMap: {
+        idle: 'Idle',
+        walk: 'Walk',
+        run: 'Walk',
+        fly: 'Fly',
+        attack: 'Attack',
+        special: 'Attack',
+        telegraph: 'Roar',
+      },
+    },
+  },
+];
+
+export const MONSTER_PREVIEW_ASSETS: readonly CreatureAssetConfig[] = [
+  DIREWOLF_COMPANION_ASSET,
   {
     id: 'marsh-direwolf-reference',
     label: 'Reference - Marsh Direwolf (static)',
     path: 'assets/monsters/bosses/ancient-wolf/marsh-direwolf.glb',
     targetHeight: 1.4,
   },
+  ...DRAGON_BOSSES.map(({ asset }) => asset),
   TYRANNOSAURUS_TEST_ASSET,
   {
     id: 'knight-preview',
@@ -43,47 +169,7 @@ export const MONSTER_PREVIEW_ASSETS: readonly CreatureAssetConfig[] = [
     path: 'assets/characters/preview/knight-in-armor.glb',
     targetHeight: 1.8,
   },
-  {
-    id: 'eternal-phoenix-optimized',
-    label: 'Floor 2 - Eternal Phoenix (99,996 triangles; static preview)',
-    path: 'assets/monsters/bosses/eternal-phoenix/phoenix-optimized-100k.glb',
-    targetHeight: 2.5,
-  },
-  {
-    id: 'eternal-dragon',
-    label: 'Floor 3 - Eternal Dragon (Ashfen Dragon)',
-    path: 'assets/monsters/bosses/eternal-dragon/ashfen-dragon.glb',
-    targetHeight: 3.2,
-  },
 ];
-
-export const ANCIENT_WOLF_BOSS_ASSET: CreatureAssetConfig = {
-  id: 'ancient-wolf',
-  label: 'Ancient Wolf (Rigged Wolf)',
-  path: 'assets/monsters/bosses/ancient-wolf/rigged-wolf.glb',
-  targetHeight: 2.45,
-  animationMap: {
-    idle: 'Wolf_Idle_',
-    walk: 'Wolf_Walk_cycle_',
-    run: 'Wolf_Run_Cycle_',
-    sit: 'Wolf_seat_',
-    telegraph: 'Wolf_creep_cycle',
-  },
-};
-
-export const ETERNAL_PHOENIX_BOSS_ASSET: CreatureAssetConfig = {
-  id: 'eternal-phoenix',
-  label: 'Eternal Phoenix (static optimized visual)',
-  path: 'assets/monsters/bosses/eternal-phoenix/phoenix-optimized-100k.glb',
-  targetHeight: 2.5,
-};
-
-export const ETERNAL_DRAGON_BOSS_ASSET: CreatureAssetConfig = {
-  id: 'eternal-dragon',
-  label: 'Eternal Dragon (Ashfen Dragon)',
-  path: 'assets/monsters/bosses/eternal-dragon/ashfen-dragon.glb',
-  targetHeight: 3.2,
-};
 
 export const GLOOM_STALKER_ASSET: CreatureAssetConfig = {
   id: 'gloom-stalker',

@@ -444,12 +444,15 @@ export class UI {
     setBar('#mana-bar', data.mana, data.character.attributes.mana);
     setBar('#xp-bar', data.character.xp, xpRequired);
     setText('#interaction-prompt', data.prompt);
-    setText('#companion-value', data.companion ? `WOLF · ${Math.ceil(data.companion.health)} HP` : 'NONE');
+    setText('#companion-value', data.companion
+      ? `DIREWOLF · ${Math.ceil(data.companion.health)} HP · ${data.companion.companionState.toUpperCase()}`
+      : 'NONE');
     const locationLabels: Record<GameLocation, string> = {
       hub: 'THE ETERNAL SANCTUARY',
       floor1: 'FLOOR 1 · FORSAKEN WILDS',
       floor2: 'FLOOR 2 · ASHEN SANCTUARY',
-      floor3: "FLOOR 3 · DRAGON'S THRONE",
+      floor3: 'FLOOR 3 · FROSTFALL THRONE',
+      floor4: 'FLOOR 4 · CINDER CROWN',
     };
     setText('#tower-location-value', locationLabels[data.location]);
     const bossStatus = this.hud.querySelector<HTMLElement>('#boss-status');
@@ -610,14 +613,15 @@ export class UI {
         <div class="panel-xp">EXPERIENCE <b>${character.xp} / ${100 + (character.level - 1) * 75} XP</b></div>
       `,
       companion: update?.companion
-        ? `<div class="companion-detail"><span class="companion-emblem" aria-hidden="true">◈</span><div><span>TRAVELING COMPANION</span><h3>${this.escape(update.companion.kind.toUpperCase())}</h3><p>${Math.ceil(update.companion.health)} HP · Following your path</p></div></div>`
-        : `<div class="panel-empty-state"><span aria-hidden="true">◈</span><h3>No companion nearby</h3><p>Weakened wolves may be befriended in the valley. Your companion status will appear here.</p><small>COMPANIONS · ${character.companions}</small></div>`,
+        ? `<div class="companion-detail"><span class="companion-emblem" aria-hidden="true">◈</span><div><span>TRAVELING COMPANION</span><h3>DIREWOLF</h3><p>${Math.ceil(update.companion.health)} HP · ${this.escape(update.companion.companionState)}</p></div></div>`
+        : `<div class="panel-empty-state"><span aria-hidden="true">◈</span><h3>Direwolf companion</h3><p>Your companion appears when you enter the world. Its health and combat state are shown here.</p><small>COMPANIONS · ${character.companions}</small></div>`,
       quests: `
         <div class="panel-intro"><span>TOWER PROGRESSION</span><p>${update?.prompt ? this.escape(update.prompt) : 'Travel between the sanctuary and the unlocked floors.'}</p></div>
         ${update ? `<div class="tower-progress-list">${[
-          ['ancient-wolf', 'Floor 1 · Ancient Wolf'],
-          ['eternal-phoenix', 'Floor 2 · Eternal Phoenix'],
-          ['eternal-dragon', "Floor 3 · Eternal Dragon"],
+          ['eastern-dragon', 'Floor 1 · Eastern Dragon'],
+          ['three-headed-hydra', 'Floor 2 · Three-Headed Hydra'],
+          ['ice-dragon', 'Floor 3 · Ice Dragon'],
+          ['fire-dragon', 'Floor 4 · Fire Dragon'],
         ].map(([boss, label], index) => {
           const floor = index + 1;
           const defeated = update.tower.defeatedBosses.includes(boss);
@@ -649,6 +653,7 @@ export class UI {
           <div><span>COMBAT</span><b>CLICK / ATTACK · E / USE</b></div>
           <div><span>SPIRIT</span><b>Q / SPIRIT · I / PACK</b></div>
           <div><span>CAMERA</span><button type="button" data-action="camera">SWITCH VIEW · V</button></div>
+          <div class="asset-credits"><span>ASSET CREDITS</span><b>Dragon models by vinish.dev · CC BY 4.0 · Nature MegaKit by Quaternius · CC0</b></div>
           <label class="graphics-setting" for="graphics-quality"><span>GRAPHICS QUALITY</span>
             <select id="graphics-quality" name="graphics-quality">
               ${(['low', 'medium', 'high', 'ultra'] as GraphicsQuality[]).map((quality) => `
