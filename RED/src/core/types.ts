@@ -73,14 +73,16 @@ export const RACE_ATTRIBUTES: Record<Race, Attributes> = {
 };
 
 export function createCharacter(race: Race, name: string): CharacterData {
+  const inventory = ['Worn sword', 'Broadsword', 'Dagger', 'Valley herb'];
+  if (race === 'Elf') inventory.push('Crystal Staff');
   return {
     name,
     race,
     level: 1,
     xp: 0,
     attributes: { ...RACE_ATTRIBUTES[race] },
-    inventory: ['Worn sword', 'Broadsword', 'Dagger', 'Valley herb'],
-    equipment: race === 'Human' ? ['Broadsword'] : ['Worn sword'],
+    inventory,
+    equipment: race === 'Human' ? ['Broadsword'] : race === 'Elf' ? ['Crystal Staff'] : ['Worn sword'],
     companions: 0,
     discoveredLocations: ['Forgotten Valley'],
     tower: createTowerProgression(),

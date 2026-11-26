@@ -15,6 +15,8 @@ export class InputManager {
   blockHeld = false;
   interactPressed = false;
   spiritPressed = false;
+  castPressed = false;
+  dodgePressed = false;
   inventoryPressed = false;
   cameraPressed = false;
   sprintHeld = false;
@@ -25,6 +27,8 @@ export class InputManager {
     if (event.code === 'Space') this.jumpPressed = true;
     if (event.code === 'KeyE') this.interactPressed = true;
     if (event.code === 'KeyQ') this.spiritPressed = true;
+    if (event.code === 'KeyR') this.castPressed = true;
+    if (event.code === 'KeyC') this.dodgePressed = true;
     if (event.code === 'KeyI') this.inventoryPressed = true;
     if (event.code === 'KeyV') this.cameraPressed = true;
   };

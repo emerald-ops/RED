@@ -4,7 +4,7 @@ import { createCharacter, normalizeTowerProgression } from './types';
 const DATABASE = 'red-forgotten-valley';
 const STORE = 'saves';
 const SAVE_KEY = 'main';
-const SAVE_VERSION = 3;
+const SAVE_VERSION = 4;
 
 interface SaveRecord {
   version: number;
@@ -83,6 +83,23 @@ export class SaveManager {
           ...record,
           version: 3,
           character: { ...character, equipment },
+        };
+        continue;
+      }
+      if (record.version === 3) {
+        const character = record.character;
+        const inventory = [...character.inventory];
+        const equipment = [...character.equipment];
+        if (character.race === 'Elf') {
+          if (!inventory.includes('Crystal Staff')) inventory.push('Crystal Staff');
+          const wornSwordIndex = equipment.indexOf('Worn sword');
+          if (wornSwordIndex !== -1) equipment[wornSwordIndex] = 'Crystal Staff';
+          else if (equipment.length === 0) equipment.push('Crystal Staff');
+        }
+        record = {
+          ...record,
+          version: 4,
+          character: { ...character, inventory, equipment },
         };
         continue;
       }

@@ -1,8 +1,13 @@
+import crystalStaffPath from '../../crystal-staff.glb?url';
+
 export interface WeaponAssetConfig {
   path: string;
   targetHeight: number;
   damageMultiplier: number;
-  gripEnd: 'min-z' | 'max-z';
+  gripEnd: 'min-z' | 'max-z' | 'min-y';
+  lengthAxis?: 'y' | 'z';
+  gripOffset?: number;
+  firstPersonScale?: number;
   weaponRotationX: number;
 }
 
@@ -27,6 +32,16 @@ export const EQUIPPABLE_WEAPONS: Readonly<Record<string, WeaponAssetConfig>> = {
     damageMultiplier: 0.9,
     gripEnd: 'min-z',
     weaponRotationX: -Math.PI / 2,
+  },
+  'Crystal Staff': {
+    path: crystalStaffPath,
+    targetHeight: 1.18,
+    damageMultiplier: 1.1,
+    gripEnd: 'min-y',
+    lengthAxis: 'y',
+    gripOffset: 0,
+    firstPersonScale: 0.45,
+    weaponRotationX: 0,
   },
 };
 

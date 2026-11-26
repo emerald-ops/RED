@@ -14,6 +14,8 @@ export interface CharacterRig {
     blocking: boolean,
     jumping: boolean,
     attackSequence?: number,
+    casting?: boolean,
+    dodging?: boolean,
   ): void;
   dispose?(): void;
 }

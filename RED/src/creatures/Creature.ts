@@ -122,7 +122,7 @@ export class Creature {
     }
   }
 
-  private get height(): number {
+  get height(): number {
     return this.bossConfig?.modelHeight
       ?? (this.kind === 'bear' ? 1.6 : this.kind === 'deer' ? 1.4 : 1.35) * (this.bossConfig?.size ?? 1);
   }

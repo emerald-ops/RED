@@ -2,10 +2,15 @@ import * as THREE from 'three';
 import * as RAPIER from '@dimforge/rapier3d-compat';
 import type { AssetManager, LoadedModel } from '../core/AssetManager';
 import type { Attributes, CharacterData } from '../core/types';
-import { PLAYER_CHARACTER_ASSETS } from '../actors/CharacterAssetConfig';
+import {
+  PLAYER_ELF_MAGE_ASSETS,
+  PLAYER_CHARACTER_ASSETS,
+  type ElfMageAssetConfig,
+} from '../actors/CharacterAssetConfig';
 import { CameraManager } from './CameraManager';
 import { createCharacterRig, type CharacterRig } from '../actors/CharacterRig';
 import { GLTFCharacterRig, type RiggedCharacterAssetConfig } from '../actors/GLTFCharacterRig';
+import { ElfMageRig } from '../actors/ElfMageRig';
 import { disposeActorModel } from '../actors/ActorGeometry';
 import { getWeaponAssetConfig } from './WeaponConfig';
 
@@ -38,6 +43,10 @@ export class Player {
   private attackEffectRemaining = 0;
   private attackEffectDuration = 0.42;
   private attackSequence = 0;
+  private spellCastRemaining = 0;
+  private readonly spellCastDuration = 0.58;
+  private dodgeRemaining = 0;
+  private readonly dodgeDirection = new THREE.Vector3();
   private elapsed = 0;
   private disposed = false;
 
@@ -80,7 +89,11 @@ export class Player {
     this.model.add(this.visualRig.model);
     this.captureDefaultWeaponParts(this.visualRig.model);
     const actorConfig = PLAYER_CHARACTER_ASSETS[this.character.race];
-    if (actorConfig && this.assets) {
+    const elfMageConfig = PLAYER_ELF_MAGE_ASSETS[this.character.race];
+    if (elfMageConfig && this.assets) {
+      this.visualRig.model.visible = false;
+      void this.loadElfMageModel(elfMageConfig, this.assets);
+    } else if (actorConfig && this.assets) {
       this.visualRig.model.visible = false;
       void this.loadImportedModel(actorConfig, this.assets);
     }
@@ -114,6 +127,99 @@ export class Player {
     void this.equipWeapon(equippedWeapon).catch((error: unknown) => {
       console.error(`Could not load equipped weapon "${equippedWeapon}".`, error);
     });
+  }
+
+  private async loadElfMageModel(config: ElfMageAssetConfig, assets: AssetManager): Promise<void> {
+    let loaded: LoadedModel;
+    try {
+      loaded = await assets.loadModel(config.path, () => new THREE.Group());
+    } catch (error) {
+      if (!this.disposed) {
+        this.visualRig.model.visible = true;
+        console.warn(`Keeping the procedural ${this.character.race} model: ${config.path} could not be loaded.`, error);
+      }
+      return;
+    }
+    if (this.disposed) {
+      assets.releaseModel(loaded.scene);
+      return;
+    }
+
+    let mageRig: ElfMageRig;
+    try {
+      mageRig = new ElfMageRig(loaded, config.targetHeight, assets);
+    } catch (error) {
+      assets.releaseModel(loaded.scene);
+      this.visualRig.model.visible = true;
+      console.warn(`Keeping the procedural ${this.character.race} model: ${config.path} was rejected.`, error);
+      return;
+    }
+
+    const previousRig = this.visualRig;
+    this.weaponSocketName = 'ElfWeaponSocket';
+    this.attackTrail.removeFromParent();
+    mageRig.weaponSocket.add(this.attackTrail);
+    this.model.remove(previousRig.model);
+    this.visualRig = mageRig;
+    this.model.add(mageRig.model);
+    this.captureDefaultWeaponParts(mageRig.model, this.weaponSocketName);
+    this.mountThirdPersonWeapon(mageRig.model, this.weaponSocketName);
+    if (previousRig.dispose) previousRig.dispose();
+    else disposeActorModel(previousRig.model);
+  }
+
+  get canCastArcane(): boolean {
+    return this.character.race === 'Elf'
+      && this.equippedWeaponName === 'Crystal Staff'
+      && this.thirdPersonWeapon !== null
+      && this.firstPersonImportedWeapon !== null;
+  }
+
+  get isCasting(): boolean {
+    return this.spellCastRemaining > 0;
+  }
+
+  startSpellCast(): number | null {
+    if (!this.canCastArcane || this.spellCastRemaining > 0 || this.dodgeRemaining > 0 || this.blocking) return null;
+    this.spellCastRemaining = this.spellCastDuration;
+    return this.spellCastDuration;
+  }
+
+  cancelSpellCast(): void {
+    this.spellCastRemaining = 0;
+  }
+
+  spendMana(amount: number): boolean {
+    if (!Number.isFinite(amount) || amount < 0 || this.mana < amount) return false;
+    this.mana -= amount;
+    return true;
+  }
+
+  staffTipWorldPosition(): THREE.Vector3 | null {
+    if (!this.canCastArcane) return null;
+    const firstPerson = this.cameraManager.mode === 'first-person';
+    const weaponRoot = firstPerson
+      ? this.firstPersonImportedWeapon?.root
+      : this.thirdPersonWeapon?.root;
+    if (!weaponRoot) return null;
+    weaponRoot.updateWorldMatrix(true, false);
+    const bounds = new THREE.Box3().setFromObject(weaponRoot);
+    if (bounds.isEmpty()) return null;
+    const center = bounds.getCenter(new THREE.Vector3());
+    center.y = bounds.max.y;
+    return center;
+  }
+
+  startDodge(move: { x: number; y: number }, cameraYaw: number): boolean {
+    if (this.dodgeRemaining > 0 || this.spellCastRemaining > 0 || this.stamina < 18) return false;
+    const forward = new THREE.Vector3(-Math.sin(cameraYaw), 0, -Math.cos(cameraYaw));
+    const right = new THREE.Vector3(Math.cos(cameraYaw), 0, -Math.sin(cameraYaw));
+    this.dodgeDirection.copy(forward).multiplyScalar(-move.y).add(right.multiplyScalar(move.x));
+    if (this.dodgeDirection.lengthSq() < 0.01) this.dodgeDirection.copy(forward);
+    this.dodgeDirection.normalize();
+    this.stamina -= 18;
+    this.dodgeRemaining = 0.38;
+    return true;
   }
 
   private async loadImportedModel(config: RiggedCharacterAssetConfig, assets: AssetManager): Promise<void> {
@@ -318,15 +424,21 @@ export class Player {
       const bounds = new THREE.Box3().setFromObject(loaded.scene);
       const size = bounds.getSize(new THREE.Vector3());
       const center = bounds.getCenter(new THREE.Vector3());
-      if (!Number.isFinite(size.z) || size.z <= 0) {
+      const length = config.lengthAxis === 'y' ? size.y : size.z;
+      if (!Number.isFinite(length) || length <= 0) {
         throw new Error(`Weapon "${item}" has invalid length bounds.`);
       }
-      const gripZ = config.gripEnd === 'min-z' ? bounds.min.z : bounds.max.z;
-      loaded.scene.position.set(-center.x, -center.y, -gripZ);
+      if (config.lengthAxis === 'y') {
+        loaded.scene.position.set(-center.x, -bounds.min.y, -center.z);
+      } else {
+        const gripZ = config.gripEnd === 'min-z' ? bounds.min.z : bounds.max.z;
+        loaded.scene.position.set(-center.x, -center.y, -gripZ);
+      }
       const root = new THREE.Group();
       root.rotation.x = config.weaponRotationX;
-      root.scale.setScalar(config.targetHeight / size.z);
-      root.position.y = config.targetHeight * (firstPersonView ? 0.2 : 0.16);
+      const firstPersonScale = firstPersonView ? config.firstPersonScale ?? 1 : 1;
+      root.scale.setScalar((config.targetHeight * firstPersonScale) / length);
+      root.position.y = config.gripOffset ?? config.targetHeight * (firstPersonView ? 0.2 : 0.16);
       root.add(loaded.scene);
       return root;
     };
@@ -360,9 +472,7 @@ export class Player {
   private mountThirdPersonWeapon(rig: THREE.Object3D, socketName = 'WeaponSocket'): void {
     if (!this.thirdPersonWeapon) return;
     const socket = rig.getObjectByName(socketName);
-    if (!(socket instanceof THREE.Bone)) {
-      throw new Error(`Could not attach the equipped weapon: "${socketName}" is not a character bone.`);
-    }
+    if (!socket) throw new Error(`Could not attach the equipped weapon: "${socketName}" was not found.`);
     for (const part of this.defaultWeaponParts) part.visible = false;
     socket.add(this.thirdPersonWeapon.root);
   }
@@ -397,14 +507,20 @@ export class Player {
     const direction = forward.multiplyScalar(-move.y).add(right.multiplyScalar(move.x));
     if (direction.lengthSq() > 0) direction.normalize();
 
-    const wantsSprint = sprinting && (move.y !== 0 || move.x !== 0);
+    const wantsSprint = sprinting && (move.y !== 0 || move.x !== 0) && this.dodgeRemaining <= 0;
     const canSprint = wantsSprint && this.stamina > 0;
     const movementConfig = PLAYER_CHARACTER_ASSETS[this.character.race];
-    const speed = canSprint
-      ? movementConfig?.runSpeed ?? 7.5
-      : movementConfig?.walkSpeed ?? 4.5;
-    if (canSprint) this.stamina = Math.max(0, this.stamina - delta * 16);
-    else this.stamina = Math.min(this.character.attributes.stamina, this.stamina + delta * 10);
+    const speed = this.dodgeRemaining > 0
+      ? 10.5
+      : canSprint
+        ? movementConfig?.runSpeed ?? 7.5
+        : movementConfig?.walkSpeed ?? 4.5;
+    if (this.dodgeRemaining > 0) direction.copy(this.dodgeDirection);
+    if (this.dodgeRemaining <= 0) {
+      if (canSprint) this.stamina = Math.max(0, this.stamina - delta * 16);
+      else this.stamina = Math.min(this.character.attributes.stamina, this.stamina + delta * 10);
+    }
+    this.mana = Math.min(this.character.attributes.mana, this.mana + delta * 2.4);
 
     const grounded = this.controller.computedGrounded();
     if (jumping && grounded && this.stamina >= 12) {
@@ -444,9 +560,13 @@ export class Player {
       this.blocking,
       !this.controller.computedGrounded(),
       this.attackSequence,
+      this.spellCastRemaining > 0,
+      this.dodgeRemaining > 0,
     );
     this.attackPending = false;
     this.damagePending = false;
+    this.spellCastRemaining = Math.max(0, this.spellCastRemaining - delta);
+    this.dodgeRemaining = Math.max(0, this.dodgeRemaining - delta);
     this.attackEffectRemaining = Math.max(0, this.attackEffectRemaining - delta);
     const activeTrail = this.attackEffectRemaining > 0;
     const firstPerson = this.cameraManager.mode === 'first-person';
@@ -465,6 +585,13 @@ export class Player {
       0.025 + Math.sin(this.elapsed * 3.2) * movementBlend * 0.018,
       0.34,
     );
+    if (this.spellCastRemaining > 0) {
+      const progress = 1 - this.spellCastRemaining / this.spellCastDuration;
+      const castPulse = Math.sin(progress * Math.PI);
+      this.firstPersonWeapon.position.y += castPulse * 0.08;
+      this.firstPersonWeapon.rotation.x -= castPulse * 0.14;
+      this.firstPersonWeapon.rotation.z += castPulse * 0.1;
+    }
     if (activeTrail) {
       const progress = 1 - this.attackEffectRemaining / this.attackEffectDuration;
       let rotationX = -0.035;
@@ -565,6 +692,8 @@ export class Player {
 
   teleport(position: THREE.Vector3): void {
     this.model.rotation.z = 0;
+    this.cancelSpellCast();
+    this.dodgeRemaining = 0;
     const bodyHeight = this.capsuleHalfHeight + this.capsuleRadius;
     const groundHeight = this.groundHeightAt(position.x, position.z);
     this.body.setTranslation({

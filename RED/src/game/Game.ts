@@ -7,6 +7,7 @@ import { SaveManager } from '../core/SaveManager';
 import { createCharacter, type CharacterData, type GameLocation, type Race } from '../core/types';
 import { CreatureSystem } from '../creatures/CreatureSystem';
 import type { Creature } from '../creatures/Creature';
+import { ArcaneSpellSystem } from './ArcaneSpellSystem';
 import { loadCreatureAsset, type GLTFCreatureRig } from '../creatures/CreatureAssetLoader';
 import { TYRANNOSAURUS_TEST_ASSET } from '../creatures/CreatureAssetConfig';
 import { createCharacterRig, type CharacterRig } from '../actors/CharacterRig';
@@ -33,6 +34,12 @@ interface PendingAttack {
   remaining: number;
 }
 
+interface PendingSpell {
+  remaining: number;
+  duration: number;
+  damage: number;
+}
+
 export class Game {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly camera = new THREE.PerspectiveCamera(68, 1, 0.1, 400);
@@ -48,6 +55,9 @@ export class Game {
   private menuPreviewElapsed = 0;
   private menuPreviewScale = 1;
   private creatures: CreatureSystem | null = null;
+  private arcaneSpells: ArcaneSpellSystem | null = null;
+  private pendingSpell: PendingSpell | null = null;
+  private arcaneCooldown = 0;
   private tyrannosaurusTestRig: GLTFCreatureRig | null = null;
   private savedCharacter: CharacterData | null = null;
   private playing = false;
@@ -97,6 +107,8 @@ export class Game {
       jump: () => { this.input.jumpPressed = true; },
       interact: () => { this.input.interactPressed = true; },
       spirit: () => { this.input.spiritPressed = true; },
+      cast: () => { this.input.castPressed = true; },
+      dodge: () => { this.input.dodgePressed = true; },
       camera: () => { this.input.cameraPressed = true; },
       toggleInventory: () => this.toggleInventory(),
       toggleTyrannosaurusTest: () => { void this.toggleTyrannosaurusTest(); },
@@ -117,6 +129,7 @@ export class Game {
     this.physics = new RAPIER.World({ x: 0, y: -19.6, z: 0 });
     this.physics.timestep = 1 / 60;
     this.world = new World(this.assets, this.physics, this.graphics, 'hub');
+    this.arcaneSpells = new ArcaneSpellSystem(this.world.scene);
     this.world.scene.add(this.camera);
     this.positionMenuCamera();
     await this.saves.open();
@@ -240,6 +253,7 @@ export class Game {
     const creatures = this.creatures!;
     this.attackCooldown = Math.max(0, this.attackCooldown - delta);
     this.comboWindow = Math.max(0, this.comboWindow - delta);
+    this.arcaneCooldown = Math.max(0, this.arcaneCooldown - delta);
     if (this.comboWindow === 0) this.comboStep = 0;
     this.respawnTimer = Math.max(0, this.respawnTimer - delta);
     this.autoSaveTimer += delta;
@@ -252,8 +266,12 @@ export class Game {
     player.blocking = this.blockTouch || this.input.isDown('KeyB');
     const movement = this.input.move();
     const sprinting = this.sprintTouch || this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight');
+    if (this.input.dodgePressed) player.startDodge(movement, player.cameraManager.yaw);
+    this.input.dodgePressed = false;
     player.update(delta, movement, player.cameraManager.yaw, sprinting, this.input.jumpPressed, look);
     this.input.jumpPressed = false;
+    if (this.input.castPressed) this.beginArcaneCast(player);
+    this.input.castPressed = false;
 
     const position = player.model.position;
     creatures.update(
@@ -266,6 +284,7 @@ export class Game {
       (creature) => this.rewardCreature(creature),
     );
 
+    this.updateArcaneSpell(delta, player, creatures.creatures);
     this.updatePendingAttack(delta);
     if (this.pendingBossReturn) {
       const message = this.pendingBossReturn;
@@ -273,6 +292,8 @@ export class Game {
       this.input.attackPressed = false;
       this.input.interactPressed = false;
       this.input.spiritPressed = false;
+      this.input.castPressed = false;
+      this.input.dodgePressed = false;
       this.input.inventoryPressed = false;
       this.input.cameraPressed = false;
       this.transitionTo('hub');
@@ -357,6 +378,102 @@ export class Game {
       sequence,
       remaining: impactDelay,
     };
+  }
+
+  private beginArcaneCast(player: Player): void {
+    if (!player.canCastArcane) {
+      this.ui.toastMessage('Equip the Crystal Staff to cast arcane spells.');
+      return;
+    }
+    if (this.arcaneCooldown > 0) {
+      this.ui.toastMessage(`Arcane focus recovering · ${this.arcaneCooldown.toFixed(1)}s`);
+      return;
+    }
+    const manaCost = 22;
+    if (player.mana < manaCost) {
+      this.ui.toastMessage('Not enough mana · arcane bolt costs 22.');
+      return;
+    }
+    const duration = player.startSpellCast();
+    if (duration === null) return;
+    if (!player.spendMana(manaCost)) {
+      player.cancelSpellCast();
+      this.ui.toastMessage('Not enough mana · arcane bolt costs 22.');
+      return;
+    }
+    const tip = player.staffTipWorldPosition();
+    if (!tip || !this.arcaneSpells) {
+      player.cancelSpellCast();
+      player.mana = Math.min(player.attributes.mana, player.mana + manaCost);
+      this.ui.toastMessage('The Crystal Staff is not ready to channel.');
+      return;
+    }
+    this.pendingSpell = {
+      remaining: duration,
+      duration,
+      damage: 24 + player.attributes.intelligence * 1.15,
+    };
+    this.arcaneSpells.beginCharge(tip);
+  }
+
+  private updateArcaneSpell(delta: number, player: Player, creatures: readonly Creature[]): void {
+    const spellSystem = this.arcaneSpells;
+    if (!spellSystem) return;
+    if (this.pendingSpell) {
+      const spell = this.pendingSpell;
+      spell.remaining = Math.max(0, spell.remaining - delta);
+      const tip = player.staffTipWorldPosition();
+      if (!tip) {
+        player.cancelSpellCast();
+        player.mana = Math.min(player.attributes.mana, player.mana + 22);
+        this.pendingSpell = null;
+        spellSystem.cancelCharge();
+        this.ui.toastMessage('Spell channel interrupted · the mana was returned.');
+      } else {
+        spellSystem.updateCharge(delta, tip, 1 - spell.remaining / spell.duration);
+        if (spell.remaining === 0) {
+          const direction = this.getArcaneAimDirection(tip, creatures);
+          spellSystem.launch(tip, direction, spell.damage);
+          this.pendingSpell = null;
+          this.arcaneCooldown = 1.15;
+        }
+      }
+    }
+    spellSystem.update(
+      delta,
+      creatures,
+      (x, z) => this.world.getSurfaceHeight(x, z),
+      ({ target, damage }) => {
+        if (!target) return;
+        this.ui.toastMessage(`Arcane bolt · ${target.displayName} · ${Math.ceil(damage)} damage`);
+      },
+    );
+  }
+
+  private getArcaneAimDirection(origin: THREE.Vector3, creatures: readonly Creature[]): THREE.Vector3 {
+    const aim = this.camera.getWorldDirection(new THREE.Vector3()).normalize();
+    let bestTarget: Creature | null = null;
+    let bestDistance = Infinity;
+    for (const creature of creatures) {
+      if (creature.mood === 'dead' || creature.mood === 'tamed') continue;
+      const center = creature.model.position.clone().add(new THREE.Vector3(0, creature.height * 0.55, 0));
+      const offset = center.sub(this.camera.position);
+      const distance = offset.dot(aim);
+      if (distance <= 0 || distance > 32 || distance >= bestDistance) continue;
+      const missDistance = offset.addScaledVector(aim, -distance).length();
+      const radius = creature.kind === 'bear' ? 1.15 : 0.8;
+      if (missDistance <= radius) {
+        bestTarget = creature;
+        bestDistance = distance;
+      }
+    }
+    if (bestTarget) {
+      return bestTarget.model.position.clone()
+        .add(new THREE.Vector3(0, bestTarget.height * 0.55, 0))
+        .sub(origin)
+        .normalize();
+    }
+    return aim;
   }
 
   private updatePendingAttack(delta: number): void {
@@ -740,11 +857,15 @@ export class Game {
     this.clearTyrannosaurusTest();
     this.creatures?.dispose();
     this.creatures = null;
+    this.cancelPendingSpell();
+    this.arcaneSpells?.dispose();
+    this.arcaneSpells = null;
     this.clearLootDrops();
     this.clearHitEffects();
     this.world.scene.remove(this.camera);
     this.world.dispose();
     this.world = new World(this.assets, this.physics, this.graphics, location);
+    this.arcaneSpells = new ArcaneSpellSystem(this.world.scene);
     this.world.scene.add(this.camera);
     if (this.player) {
       this.player.teleport(this.world.spawn);
@@ -777,6 +898,7 @@ export class Game {
 
   private disposeActors(): void {
     this.clearTyrannosaurusTest();
+    this.cancelPendingSpell();
     if (this.player) {
       this.world.scene.remove(this.player.model);
       this.player.dispose();
@@ -828,6 +950,8 @@ export class Game {
     this.disposeMenuPreview();
     this.clearLootDrops();
     this.clearHitEffects();
+    this.arcaneSpells?.dispose();
+    this.arcaneSpells = null;
     this.world?.scene.remove(this.camera);
     this.world?.dispose();
     this.assets.dispose();
@@ -848,5 +972,14 @@ export class Game {
       effect.ring.material.dispose();
     }
     this.hitEffects.length = 0;
+  }
+
+  private cancelPendingSpell(): void {
+    if (this.pendingSpell && this.player) {
+      this.player.mana = Math.min(this.player.attributes.mana, this.player.mana + 22);
+      this.player.cancelSpellCast();
+    }
+    this.pendingSpell = null;
+    this.arcaneSpells?.cancelCharge();
   }
 }

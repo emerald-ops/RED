@@ -11,6 +11,8 @@ export interface UIActions {
   jump: () => void;
   interact: () => void;
   spirit: () => void;
+  cast: () => void;
+  dodge: () => void;
   camera: () => void;
   toggleInventory: () => void;
   toggleTyrannosaurusTest: () => void;
@@ -283,6 +285,12 @@ export class UI {
       case 'spirit':
         this.actions.spirit();
         break;
+      case 'cast':
+        this.actions.cast();
+        break;
+      case 'dodge':
+        this.actions.dodge();
+        break;
       case 'camera':
         this.actions.camera();
         break;
@@ -386,14 +394,16 @@ export class UI {
         <small id="boss-health-value"></small>
       </section>
       <div class="interaction-prompt" id="interaction-prompt" role="status" aria-live="polite"></div>
-      <div class="desktop-hints"><span>WASD MOVE</span><span>SHIFT SPRINT</span><span>SPACE JUMP</span><span>CLICK ATTACK</span><span>E USE</span><span>Q SPIRIT</span></div>
+      <div class="desktop-hints"><span>WASD MOVE</span><span>SHIFT SPRINT</span><span>SPACE JUMP</span><span>CLICK ATTACK</span><span>E USE</span><span>Q SPIRIT</span><span>C DODGE</span><span>R SPELL</span></div>
       <div class="touch-controls">
         <div class="joystick" role="application" aria-label="Touch movement joystick"><span></span></div>
         <div class="touch-actions">
           <button type="button" data-action="camera" aria-label="Switch camera"><span aria-hidden="true">◉</span><small>CAM</small></button>
           <button type="button" data-action="jump" aria-label="Jump"><span aria-hidden="true">↑</span><small>JUMP</small></button>
+          <button type="button" data-action="dodge" aria-label="Dodge"><span aria-hidden="true">↗</span><small>DODGE</small></button>
           <button type="button" data-action="block" aria-label="Hold block"><span aria-hidden="true">⬡</span><small>BLOCK</small></button>
           <button type="button" data-action="spirit" aria-label="Use spirit ability"><span aria-hidden="true">✧</span><small>SPIRIT</small></button>
+          <button type="button" data-action="cast" aria-label="Cast arcane spell"><span aria-hidden="true">✦</span><small>CAST</small></button>
           <button type="button" data-action="attack" class="attack-button" aria-label="Attack"><span aria-hidden="true">⚔</span><small>ATTACK</small></button>
           <button type="button" data-action="interact" aria-label="Use or interact"><span aria-hidden="true">◇</span><small>USE</small></button>
           <button type="button" data-action="sprint" aria-label="Hold sprint"><span aria-hidden="true">»</span><small>RUN</small></button>

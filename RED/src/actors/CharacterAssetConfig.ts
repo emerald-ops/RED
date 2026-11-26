@@ -1,5 +1,6 @@
 import type { Race } from '../core/types';
 import type { RiggedCharacterAssetConfig } from './GLTFCharacterRig';
+import elfModelPath from '../../elf-rigged.glb?url';
 
 export const PATCH_ANIMATED_KNIGHT: RiggedCharacterAssetConfig = {
   path: 'assets/characters/patch-knight/animatedKnightInPlateArmour.glb',
@@ -56,4 +57,16 @@ export const PATCH_ANIMATED_KNIGHT: RiggedCharacterAssetConfig = {
 
 export const PLAYER_CHARACTER_ASSETS: Partial<Record<Race, RiggedCharacterAssetConfig>> = {
   Human: PATCH_ANIMATED_KNIGHT,
+};
+
+export interface ElfMageAssetConfig {
+  path: string;
+  targetHeight: number;
+}
+
+export const PLAYER_ELF_MAGE_ASSETS: Partial<Record<Race, ElfMageAssetConfig>> = {
+  Elf: {
+    path: elfModelPath,
+    targetHeight: 1.72,
+  },
 };
