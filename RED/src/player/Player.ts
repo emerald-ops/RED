@@ -180,6 +180,10 @@ export class Player {
     return this.spellCastRemaining > 0;
   }
 
+  get isDodging(): boolean {
+    return this.dodgeRemaining > 0;
+  }
+
   startSpellCast(): number | null {
     if (!this.canCastArcane || this.spellCastRemaining > 0 || this.dodgeRemaining > 0 || this.blocking) return null;
     this.spellCastRemaining = this.spellCastDuration;

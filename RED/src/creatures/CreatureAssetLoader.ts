@@ -136,9 +136,12 @@ export class GLTFCreatureRig implements CreatureRig {
   private disposed = false;
   private readonly hydraNecks = new Map<string, THREE.Bone[]>();
   private readonly hydraHeads = new Map<string, THREE.Bone>();
+  private readonly attackBones = new Map<string, THREE.Bone>();
   private readonly proceduralOffsets = new Map<THREE.Bone, THREE.Quaternion>();
   private hydraAttackElapsed = 0;
+  private wolfAttackElapsed = 0;
   private wasAttacking = false;
+  private wasWolfAttacking = false;
 
   constructor(
     private readonly loaded: LoadedModel,
@@ -155,17 +158,21 @@ export class GLTFCreatureRig implements CreatureRig {
     this.model.rotation.y = config.rotationY ?? 0;
     this.model.scale.setScalar(scale);
     this.animationMap = config.animationMap ?? {};
-    if (config.id === 'three-headed-hydra') {
+    if (config.id === 'three-headed-hydra' || config.id === 'direwolf-companion'
+      || config.id.endsWith('-dragon')) {
       loaded.scene.traverse((object) => {
         if (!(object instanceof THREE.Bone)) return;
-        const neck = /^Neck([1-4])_([ABC])$/.exec(object.name);
-        if (neck) {
-          const chain = this.hydraNecks.get(neck[2]) ?? [];
-          chain[Number(neck[1]) - 1] = object;
-          this.hydraNecks.set(neck[2], chain);
+        this.attackBones.set(object.name, object);
+        if (config.id === 'three-headed-hydra') {
+          const neck = /^Neck([1-4])_([ABC])$/.exec(object.name);
+          if (neck) {
+            const chain = this.hydraNecks.get(neck[2]) ?? [];
+            chain[Number(neck[1]) - 1] = object;
+            this.hydraNecks.set(neck[2], chain);
+          }
+          const head = /^Head_([ABC])$/.exec(object.name);
+          if (head) this.hydraHeads.set(head[1], object);
         }
-        const head = /^Head_([ABC])$/.exec(object.name);
-        if (head) this.hydraHeads.set(head[1], object);
       });
     }
     loaded.scene.position.set(-center.x, -bounds.min.y, -center.z);
@@ -256,7 +263,7 @@ export class GLTFCreatureRig implements CreatureRig {
     const clipName = this.animationMap[state];
     const loops = state === 'idle' || state === 'walk' || state === 'run' || state === 'fly';
     if (clipName && this.clips.has(clipName)) this.playClip(clipName, loops);
-    else if (this.activeClipName) this.stopClip();
+    else if (dead && this.activeClipName) this.stopClip();
     for (const [bone, offset] of this.proceduralOffsets) bone.quaternion.multiply(offset.clone().invert());
     this.proceduralOffsets.clear();
     this.mixer.update(delta);
@@ -266,7 +273,78 @@ export class GLTFCreatureRig implements CreatureRig {
     } else {
       this.hydraAttackElapsed = 0;
     }
+    if (this.loaded.scene.getObjectByName('Kopf.002') && (attacking || takingDamage)) {
+      this.wolfAttackElapsed = attacking && !this.wasWolfAttacking ? delta : this.wolfAttackElapsed + delta;
+      this.applyWolfCombatMotion(attacking, takingDamage);
+    } else {
+      this.wolfAttackElapsed = 0;
+    }
+    if (this.attackBones.size && (attacking || takingDamage) && this.hydraHeads.size !== 3
+      && !this.loaded.scene.getObjectByName('Kopf.002')) {
+      this.hydraAttackElapsed = attacking && !this.wasAttacking ? delta : this.hydraAttackElapsed + delta;
+      this.applyDragonCombatMotion(attacking, takingDamage, attackVariant);
+    } else if (this.hydraHeads.size !== 3 && !this.loaded.scene.getObjectByName('Kopf.002')) {
+      this.hydraAttackElapsed = 0;
+    }
     this.wasAttacking = attacking;
+    this.wasWolfAttacking = attacking && Boolean(this.loaded.scene.getObjectByName('Kopf.002'));
+  }
+
+  private applyBoneOffset(name: string, pitch: number, yaw = 0): void {
+    const bone = this.attackBones.get(name);
+    if (!bone) return;
+    const offset = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, yaw, 0, 'XYZ'));
+    bone.quaternion.multiply(offset);
+    const previous = this.proceduralOffsets.get(bone);
+    this.proceduralOffsets.set(bone, previous ? previous.multiply(offset) : offset);
+  }
+
+  private applyWolfCombatMotion(attacking: boolean, takingDamage: boolean): void {
+    const progress = THREE.MathUtils.clamp(this.wolfAttackElapsed / 0.58, 0, 1);
+    const strike = attacking ? Math.sin(progress * Math.PI) : 0;
+    const recoil = takingDamage ? 1 : 0;
+    this.applyBoneOffset('Hals', -0.16 * strike + 0.12 * recoil);
+    this.applyBoneOffset('Kopf.002', -0.38 * strike + 0.24 * recoil);
+    this.applyBoneOffset('Kopf', -0.18 * strike);
+    this.applyBoneOffset('Unterkiefer', -0.48 * strike);
+    this.applyBoneOffset('Oberarm_L', -0.26 * strike);
+    this.applyBoneOffset('Oberarm_R', -0.26 * strike);
+    this.applyBoneOffset('Unterarm_L', 0.18 * strike);
+    this.applyBoneOffset('Unterarm_R', 0.18 * strike);
+  }
+
+  private applyDragonCombatMotion(attacking: boolean, takingDamage: boolean, attackVariant: number): void {
+    const progress = THREE.MathUtils.clamp(this.hydraAttackElapsed / 0.85, 0, 1);
+    const strike = attacking ? Math.sin(progress * Math.PI) : 0;
+    const recoil = takingDamage ? 1 : 0;
+    const variant = attackVariant % 4;
+
+    if (variant === 0) {
+      this.applyBoneOffset('Fore_Thigh_L', -0.48 * strike);
+      this.applyBoneOffset('Fore_Thigh_R', -0.15 * strike);
+      this.applyBoneOffset('Chest', -0.12 * strike + 0.1 * recoil);
+    } else if (variant === 1) {
+      for (let index = 1; index <= 4; index++) {
+        this.applyBoneOffset(`Neck${index}`, -0.22 * strike);
+      }
+      this.applyBoneOffset('Head', -0.28 * strike + 0.2 * recoil);
+      this.applyBoneOffset('Jaw', -0.42 * strike);
+    } else if (variant === 2) {
+      for (let index = 1; index <= 7; index++) {
+        this.applyBoneOffset(`Tail${index}`, 0, (index / 7) * 0.54 * strike);
+      }
+      this.applyBoneOffset('Chest', 0, -0.12 * strike);
+    } else {
+      this.applyBoneOffset('Chest', 0.18 * strike + 0.1 * recoil);
+      this.applyBoneOffset('Fore_Thigh_L', -0.22 * strike);
+      this.applyBoneOffset('Fore_Thigh_R', -0.22 * strike);
+      this.applyBoneOffset('Wing_Arm_L', -0.3 * strike);
+      this.applyBoneOffset('Wing_Arm_R', -0.3 * strike);
+    }
+    if (takingDamage) {
+      this.applyBoneOffset('Head', 0.2 * recoil);
+      this.applyBoneOffset('Chest', 0.1 * recoil);
+    }
   }
 
   private applyHydraAttackMotion(attacking: boolean, telegraph: boolean, attackVariant: number): void {

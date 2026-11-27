@@ -27,6 +27,18 @@ export interface DragonAttack {
   damage: number;
 }
 
+export type BossCombatState =
+  | 'Idle'
+  | 'Detecting'
+  | 'Approaching'
+  | 'Telegraphing'
+  | 'Attacking'
+  | 'Recovering'
+  | 'Repositioning'
+  | 'Staggered'
+  | 'Phase transition'
+  | 'Defeated';
+
 export type CompanionState = 'Following' | 'Exploring' | 'Alert' | 'Attacking' | 'Recovering' | 'Returning';
 
 export class Creature {
@@ -41,6 +53,7 @@ export class Creature {
   readonly displayName: string;
   readonly maxHealth: number;
   bossPhase = 1;
+  combatState: BossCombatState = 'Idle';
   visualAnimationStatus = 'Procedural fallback active';
   companionState: CompanionState = 'Following';
   defeatReady = false;
@@ -55,6 +68,7 @@ export class Creature {
   private attackWindup = 0;
   private attackWindupDuration = 0;
   private attackAnimationRemaining = 0;
+  private phaseTransitionRemaining = 0;
   private attackSpecial = false;
   private attackLungeRemaining = 0;
   private readonly attackLungeDirection = new THREE.Vector3();
@@ -200,6 +214,7 @@ export class Creature {
     },
   ): void {
     if (this.mood === 'dead') {
+      this.combatState = this.bossConfig ? 'Defeated' : this.combatState;
       this.deathSequenceRemaining = Math.max(0, this.deathSequenceRemaining - delta);
       this.visualRig.update(delta, 0, false, false, this.damagePending, true, false);
       const fall = this.bossConfig
@@ -223,18 +238,45 @@ export class Creature {
     const takingDamage = this.damagePending || this.damageAnimationRemaining > 0;
     this.damageAnimationRemaining = Math.max(0, this.damageAnimationRemaining - delta);
     this.attackAnimationRemaining = Math.max(0, this.attackAnimationRemaining - delta);
+    this.phaseTransitionRemaining = Math.max(0, this.phaseTransitionRemaining - delta);
     this.attackCooldown = Math.max(0, this.attackCooldown - delta);
     if (this.attackImpactRemaining > 0) {
       this.attackImpactRemaining = Math.max(0, this.attackImpactRemaining - delta);
       if (this.attackImpactRemaining === 0) {
         if (this.companionAttackPending) {
-          callbacks.companionAttack?.();
+          const targetPosition = callbacks.companionTarget;
+          if (targetPosition) {
+            const toTarget = targetPosition.clone().sub(current).setY(0);
+            const facing = new THREE.Vector3(Math.sin(this.model.rotation.y), 0, Math.cos(this.model.rotation.y));
+            if (toTarget.length() <= 2 && facing.dot(toTarget.normalize()) >= 0.2) {
+              callbacks.companionAttack?.();
+            }
+          }
           this.companionAttackPending = false;
         } else if (this.pendingAttackTarget) {
-          if (this.pendingAttackTarget === 'companion') callbacks.damageCompanion?.(this.pendingAttackDamage);
-          else callbacks.damagePlayer(this.pendingAttackDamage, this.pendingAttackStyle);
-          this.attackLungeRemaining = 0.2;
-          this.attackLungeDirection.copy(this.pendingAttackDirection);
+          const attackRange = this.bossConfig
+            ? this.bossConfig.style === 'hydra' ? 5 : this.bossConfig.style === 'eastern' ? 4.6 : 4
+            : this.kind === 'bear' ? 2.5 : 1.8;
+          if (this.pendingAttackTarget === 'companion') {
+            const companionPosition = callbacks.companionPosition;
+            if (companionPosition) {
+              const toCompanion = companionPosition.clone().sub(current).setY(0);
+              const facing = new THREE.Vector3(Math.sin(this.model.rotation.y), 0, Math.cos(this.model.rotation.y));
+              if (toCompanion.length() <= attackRange && facing.dot(toCompanion.normalize()) >= 0.2) {
+                callbacks.damageCompanion?.(this.pendingAttackDamage);
+                this.attackLungeRemaining = 0.2;
+                this.attackLungeDirection.copy(this.pendingAttackDirection);
+              }
+            }
+          } else {
+            const toPlayer = playerPosition.clone().sub(current).setY(0);
+            const facing = new THREE.Vector3(Math.sin(this.model.rotation.y), 0, Math.cos(this.model.rotation.y));
+            if (toPlayer.length() <= attackRange && facing.dot(toPlayer.normalize()) >= 0.2) {
+              callbacks.damagePlayer(this.pendingAttackDamage, this.pendingAttackStyle);
+              this.attackLungeRemaining = 0.2;
+              this.attackLungeDirection.copy(this.pendingAttackDirection);
+            }
+          }
           this.pendingAttackTarget = null;
           this.pendingAttackStyle = undefined;
         }
@@ -253,26 +295,26 @@ export class Creature {
         const facing = new THREE.Vector3(Math.sin(this.model.rotation.y), 0, Math.cos(this.model.rotation.y));
         const facingPlayer = toPlayer.lengthSq() > 0.001 && facing.dot(toPlayer.normalize()) >= 0.35;
         const style = this.bossConfig?.style;
-        const closeRange = style === 'hydra' ? 5 : 3.6;
+        const closeRange = style === 'hydra' ? 5 : style === 'eastern' ? 4.6 : 4;
         const hitRange = style ? closeRange : this.bossConfig?.range ?? (this.kind === 'bear' ? 2.5 : 1.8);
         const attackTypes: Record<DragonBossStyle, DragonAttack['type'][]> = {
           eastern: ['projectile', 'breath', 'ground'],
-          hydra: ['breath', 'ground', 'breath'],
+          hydra: ['breath', 'ground', 'projectile'],
           ice: ['projectile', 'ground', 'breath'],
           fire: ['projectile', 'breath', 'ground'],
         };
         this.activeAttackVariant = style ? this.bossAttackSequence++ : 0;
-        const attackType = style
+        const rangedType = style
           ? attackTypes[style][this.activeAttackVariant % attackTypes[style].length]
           : null;
-        const rangedAttack = style && distance > closeRange && attackType !== null;
+        const rangedAttack = style && distance > closeRange && rangedType !== null;
         if (rangedAttack) {
           const direction = playerPosition.clone().sub(current).setY(0).normalize();
           const origin = current.clone().add(new THREE.Vector3(0, this.height * 0.62, 0))
             .addScaledVector(direction, Math.min(1.6, this.height * 0.2));
           callbacks.bossAttack?.({
             style,
-            type: attackType,
+            type: rangedType,
             origin,
             target: playerPosition.clone().add(new THREE.Vector3(0, 0.9, 0)),
             damage: this.bossConfig!.damage * (this.bossPhase === 2 ? 1.35 : 1),
@@ -299,7 +341,7 @@ export class Creature {
             this.pendingAttackStyle = style;
             this.pendingAttackDamage = damage;
             this.pendingAttackDirection.copy(targetsCompanion && toCompanion ? toCompanion : toPlayer).normalize();
-            this.attackImpactRemaining = this.bossConfig ? 0.42 : this.kind === 'bear' ? 0.34 : 0.24;
+            this.attackImpactRemaining = this.bossConfig ? 0.28 : this.kind === 'bear' ? 0.34 : 0.24;
             this.attackAnimationRemaining = this.bossConfig ? 1.25 : this.kind === 'bear' ? 0.86 : 0.68;
             this.attackSpecial = this.bossPhase === 2;
             this.attackCooldown = this.bossConfig ? (this.bossPhase === 2 ? 1.35 : 2.05) : this.kind === 'bear' ? 1.9 : 1.35;
@@ -334,11 +376,15 @@ export class Creature {
         target = playerPosition;
         speed = 4;
       }
-    } else if (this.bossConfig) {
+    } else if (this.bossConfig && this.phaseTransitionRemaining === 0 && this.damageAnimationRemaining === 0) {
       if (distance < 42) {
         if (this.attackWindup > 0) {
           target = playerPosition;
-        } else if (this.bossConfig.style === 'eastern' && distance <= this.bossConfig.range) {
+        } else if (
+          this.bossConfig.style === 'eastern'
+          && distance <= this.bossConfig.range
+          && this.attackCooldown > 0
+        ) {
           const orbit = this.elapsed * (this.bossPhase === 2 ? 1.1 : 0.72);
           target = new THREE.Vector3(
             playerPosition.x + Math.cos(orbit) * 6.2,
@@ -440,7 +486,13 @@ export class Creature {
     this.model.position.set(nextX, Math.max(groundHeight, position.y + movement.y - this.groundOffset), nextZ);
     const flightCycle = this.elapsed % 13;
     const flightPhase = flightCycle > 9 && this.bossConfig?.style !== 'hydra';
-    const flying = Boolean(this.bossConfig?.style && this.bossConfig.style !== 'hydra' && flightPhase && movementSpeed > 0);
+    const flying = Boolean(
+      this.bossConfig?.style
+      && this.bossConfig.style !== 'hydra'
+      && flightPhase
+      && movementSpeed > 0
+      && this.attackAnimationRemaining === 0,
+    );
     if (flying) movementSpeed = Math.max(movementSpeed, 5);
     const hoverHeight = flying ? 2.25 : this.bossConfig?.hoverHeight ?? 0;
     this.visualRig.model.position.y = hoverHeight
@@ -453,10 +505,13 @@ export class Creature {
       takingDamage,
       false,
       this.attackSpecial && this.attackAnimationRemaining > 0,
-      Boolean(this.bossConfig && this.attackWindup > 0),
+      Boolean(this.bossConfig && (this.attackWindup > 0 || this.phaseTransitionRemaining > 0)),
       this.activeAttackVariant,
       flying,
     );
+    if (this.bossConfig) {
+      this.combatState = this.getBossCombatState(distance, movementSpeed);
+    }
     if (this.attackAnimationRemaining === 0) this.attackSpecial = false;
     this.damagePending = false;
     this.healthBarTrack.quaternion.copy(this.model.quaternion).invert();
@@ -468,7 +523,16 @@ export class Creature {
   takeDamage(amount: number, knockbackDirection?: THREE.Vector3): void {
     if (this.mood === 'dead') return;
     this.health = Math.max(0, this.health - amount);
-    if (this.bossConfig) this.bossPhase = this.health <= this.maxHealth * 0.5 ? 2 : 1;
+    if (this.bossConfig && this.attackWindup > 0) {
+      this.attackWindup = 0;
+      this.attackCooldown = Math.max(this.attackCooldown, 0.45);
+      if (this.attackTelegraph) this.attackTelegraph.visible = false;
+    }
+    if (this.bossConfig && this.bossPhase === 1 && this.health <= this.maxHealth * 0.5) {
+      this.bossPhase = 2;
+      this.phaseTransitionRemaining = 1.1;
+      this.attackCooldown = Math.max(this.attackCooldown, this.phaseTransitionRemaining);
+    }
     this.damagePending = true;
     this.damageAnimationRemaining = 0.38;
     if (knockbackDirection && knockbackDirection.lengthSq() > 0) {
@@ -477,6 +541,8 @@ export class Creature {
     }
     if (this.health === 0) {
       this.mood = 'dead';
+      this.combatState = this.bossConfig ? 'Defeated' : this.combatState;
+      this.phaseTransitionRemaining = 0;
       this.attackImpactRemaining = 0;
       this.pendingAttackTarget = null;
       this.pendingAttackStyle = undefined;
@@ -488,6 +554,19 @@ export class Creature {
       this.healthBar.visible = false;
       if (this.attackTelegraph) this.attackTelegraph.visible = false;
     }
+  }
+
+  private getBossCombatState(distance: number, movementSpeed: number): BossCombatState {
+    if (this.mood === 'dead') return 'Defeated';
+    if (this.phaseTransitionRemaining > 0) return 'Phase transition';
+    if (this.damageAnimationRemaining > 0) return 'Staggered';
+    if (this.attackWindup > 0) return 'Telegraphing';
+    if (this.attackAnimationRemaining > 0) return 'Attacking';
+    if (this.attackCooldown > 0) return 'Recovering';
+    if (distance >= 42) return 'Idle';
+    if (distance > (this.bossConfig?.range ?? 1.8)) return 'Approaching';
+    if (this.bossConfig?.style === 'eastern' && movementSpeed > 0) return 'Repositioning';
+    return 'Detecting';
   }
 
   tame(): void {

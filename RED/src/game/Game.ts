@@ -283,6 +283,7 @@ export class Game {
       delta,
       position,
       (damage, style?: DragonBossStyle) => {
+        if (player.isDodging) return;
         player.takeDamage(damage);
         if (style === 'ice') {
           this.frostSlowRemaining = Math.max(this.frostSlowRemaining, 2.4);
@@ -377,7 +378,12 @@ export class Game {
         offset.length() <= (creature.bossId ? Math.max(2.8, creature.height * 1.2) : 2.8)
         && offset.normalize().dot(forward) > 0.2,
       )
-      .sort((a, b) => a.creature.model.position.distanceTo(player.model.position) - b.creature.model.position.distanceTo(player.model.position))[0];
+      .filter(({ creature }) => this.getMeleeHitDirection(creature) !== null)
+      .sort((a, b) =>
+        Number(Boolean(b.creature.bossId)) - Number(Boolean(a.creature.bossId))
+        || a.creature.model.position.distanceTo(player.model.position)
+          - b.creature.model.position.distanceTo(player.model.position),
+      )[0];
     if (!target) {
       this.ui.toastMessage('Miss · face a creature and strike within range.');
       return;
@@ -387,10 +393,41 @@ export class Game {
     this.pendingAttack = {
       target: target.creature,
       damage,
-      direction: target.offset.normalize(),
+      direction: this.getMeleeHitDirection(target.creature)!,
       sequence,
       remaining: impactDelay,
     };
+  }
+
+  private getMeleeHitDirection(target: Creature): THREE.Vector3 | null {
+    const player = this.player!;
+    const offset = target.model.position.clone().sub(player.model.position);
+    const range = target.bossId ? Math.max(2.8, target.height * 1.2) : 2.8;
+    if (offset.length() > range) return null;
+
+    const direction = offset.normalize();
+    const forward = new THREE.Vector3(-Math.sin(player.cameraManager.yaw), 0, -Math.cos(player.cameraManager.yaw));
+    if (direction.dot(forward) <= 0.2) return null;
+
+    const playerPosition = player.model.position;
+    const targetPosition = target.body.translation();
+    const origin = new THREE.Vector3(playerPosition.x, playerPosition.y + 1, playerPosition.z);
+    const destination = new THREE.Vector3(targetPosition.x, targetPosition.y, targetPosition.z);
+    const rayDirection = destination.sub(origin);
+    const distance = rayDirection.length();
+    if (distance <= 0) return direction;
+    rayDirection.normalize();
+    const hit = this.physics.queryPipeline.castRay(
+      this.physics.bodies,
+      this.physics.colliders,
+      new RAPIER.Ray(origin, rayDirection),
+      distance,
+      true,
+      undefined,
+      undefined,
+      player.collider.handle,
+    );
+    return hit?.collider.handle === target.collider.handle ? direction : null;
   }
 
   private beginArcaneCast(player: Player): void {
@@ -496,7 +533,12 @@ export class Game {
     const attack = this.pendingAttack;
     this.pendingAttack = null;
     if (attack.target.mood === 'dead' || attack.target.mood === 'tamed') return;
-    attack.target.takeDamage(attack.damage, attack.direction);
+    const direction = this.getMeleeHitDirection(attack.target);
+    if (!direction) {
+      this.ui.toastMessage('Miss · target moved or was blocked before impact.');
+      return;
+    }
+    attack.target.takeDamage(attack.damage, direction);
     this.spawnHitEffect(
       attack.target.model.position.clone().add(new THREE.Vector3(0, 0.78, 0)),
       attack.sequence,

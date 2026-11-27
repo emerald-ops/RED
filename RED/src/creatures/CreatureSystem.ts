@@ -89,13 +89,17 @@ export class CreatureSystem {
     this.spiritAttackTimer -= delta;
     const companion = this.companion;
     const companionTarget = companion && companion.mood !== 'dead'
-      ? this.creatures.find((creature) =>
+      ? this.creatures.filter((creature) =>
         (creature.kind === 'wolf' || creature.kind === 'bear')
         && creature !== companion
         && creature.mood !== 'dead' && creature.mood !== 'tamed'
         && (creature.bossId !== null || creature.model.position.distanceTo(playerPosition) < 13)
         && creature.model.position.distanceTo(companion.model.position) < 12,
-      ) ?? null
+      ).sort((a, b) => {
+        const bossPriority = Number(Boolean(b.bossId)) - Number(Boolean(a.bossId));
+        return bossPriority || a.model.position.distanceTo(companion.model.position)
+          - b.model.position.distanceTo(companion.model.position);
+      })[0] ?? null
       : null;
     for (const creature of this.creatures) {
       creature.update(delta, playerPosition, {
