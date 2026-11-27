@@ -373,7 +373,10 @@ export class Game {
     const target = this.creatures!.creatures
       .filter((creature) => creature.mood !== 'dead' && creature.mood !== 'tamed')
       .map((creature) => ({ creature, offset: creature.model.position.clone().sub(player.model.position) }))
-      .filter(({ offset }) => offset.length() <= 2.8 && offset.normalize().dot(forward) > 0.2)
+      .filter(({ creature, offset }) =>
+        offset.length() <= (creature.bossId ? Math.max(2.8, creature.height * 1.2) : 2.8)
+        && offset.normalize().dot(forward) > 0.2,
+      )
       .sort((a, b) => a.creature.model.position.distanceTo(player.model.position) - b.creature.model.position.distanceTo(player.model.position))[0];
     if (!target) {
       this.ui.toastMessage('Miss · face a creature and strike within range.');
